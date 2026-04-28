@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest an enhancement or new capability for module-info
+labels: ["enhancement"]
+title: "[FEATURE] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to share an idea. Before opening a request,
+        please check that there isn't already an open issue tracking the same proposal.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: |
+        What problem are you trying to solve? Describe the user-facing pain
+        point, not just the proposed solution.
+      placeholder: "I'm trying to do X, but module-info currently only supports Y, which means..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        A clear description of what you'd like to happen. If you have a
+        specific API in mind, sketch it here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you consider, and why did you rule them out?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to related issues, prior art in other crates, ELF spec references, etc.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I have followed the [Code of Conduct](https://github.com/microsoft/module-info/blob/main/CODE_OF_CONDUCT.md).
+          required: true
+        - label: I have searched existing issues and confirmed this is not a duplicate.
+          required: true

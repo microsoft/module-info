@@ -1,0 +1,30 @@
+[package]
+name = "sample_crashing_process"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+authors = ["Team Name <example@contoso.com>"]
+description = "A Linux-specific example program that demonstrates module_info usage and generates various types of crashes"
+
+[package.metadata.module_info]
+maintainer = "example@contoso.com"
+type = "tool"
+copyright = "Contoso, Ltd."
+# Embed the CI-provided build number when one is available; see README "CI Integration".
+version_env_var_name = "BUILD_BUILDNUMBER"
+module_version_env_var_name = "BUILD_BUILDNUMBER"
+
+[[bin]]
+name = "sample_crashing_process"
+path = "src/main.rs"
+
+[dependencies]
+module-info = { path = "../..", features = ["embed-module-info"] }
+nix = { version = "0", features = ["signal"] }
+
+[build-dependencies]
+module-info = { path = "../.." }
+
+# Standalone Cargo package; detach from the outer workspace so it builds via
+# `cargo build --manifest-path <this>` like an external consumer would.
+[workspace]

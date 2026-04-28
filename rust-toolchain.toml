@@ -1,0 +1,13 @@
+[toolchain]
+# No `channel` pin: bare cargo uses the contributor's default toolchain so
+# tools like `cargo deny` (which scans cross-target deps and chokes on
+# edition-2024 manifests under cargo 1.74) keep working. MSRV is enforced
+# by `rust-version = "1.74"` in Cargo.toml and by the 1.74 leg of the CI
+# test matrix; contributors verifying locally use `cargo +1.74 ...`.
+components = [
+  "rustc",
+  "rustfmt",
+  "rust-std",
+  "cargo",
+  "clippy",
+]

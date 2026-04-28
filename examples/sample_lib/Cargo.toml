@@ -1,0 +1,29 @@
+[package]
+name = "sample_lib"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[package.metadata.module_info]
+maintainer = "example@contoso.com"
+type = "library"
+copyright = "Contoso, Ltd."
+
+# Embed the CI-supplied build number when one is available; see the README
+# "CI Integration" section for how `BUILD_BUILDNUMBER` is normalized.
+version_env_var_name = "BUILD_BUILDNUMBER"
+module_version_env_var_name = "BUILD_BUILDNUMBER"
+
+[lib]
+name = "sample_lib"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+module-info = { path = "../..", features = ["embed-module-info"] }
+
+[build-dependencies]
+module-info = { path = "../.." }
+
+# Standalone Cargo package; detach from the outer workspace so it builds via
+# `cargo build --manifest-path <this>` like an external consumer would.
+[workspace]

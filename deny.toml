@@ -1,0 +1,25 @@
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Allowlist for the dep tree. Bumps here should be deliberate; every new
+# license is a redistribution-rights commitment for downstream consumers.
+# Keep this list to what's actually encountered: cargo-deny warns on
+# unmatched entries (`license-not-encountered`).
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "Unicode-3.0",
+  "Unlicense",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
