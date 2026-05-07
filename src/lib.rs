@@ -25,33 +25,41 @@
 //!
 //! # Limitations
 //!
-//! **Static (`rlib`) consumers read the host binary's metadata, not their own.**
-//! `cargo:rustc-link-arg=-T<linker_script>.ld` directives emitted by
-//! `module-info`'s `build.rs` are not propagated transitively from `rlib`
-//! dependencies to the final executable's link command. An `rlib` that calls
-//! [`embed!`]/[`get_module_info!`] compiles its source with *undefined*
-//! references to `module_info_binary`, `module_info_version`, etc.; at the
-//! final link those references resolve against the executable's linker
-//! script. The result is a single set of `module_info_*` symbols in the
-//! binary, all carrying the executable's metadata, and library code reading
-//! them gets the executable's values. The same applies to anything compiled
-//! into the consumer's final ELF: `staticlib`, `rlib`, or in-tree workspace
-//! libraries.
+//! **`rlib` consumers read the host binary's metadata, not their own.**
+//! When a downstream library's `build.rs` calls
+//! [`generate_project_metadata_and_linker_script`], the resulting
+//! `cargo:rustc-link-arg=-T<linker_script>.ld` directive is attached to that
+//! library's own build and does not propagate to the final executable's link
+//! command, so the library's linker script never runs at the link step that
+//! produces the binary. Meanwhile, every [`get_module_info!`] call inside
+//! the library expands to an `extern "C" { static module_info_*: u8; }`
+//! declaration. At the final link those undefined references resolve
+//! against the executable's linker script, which defines a single set of
+//! `module_info_*` symbols pointing at the executable's `.note.package`
+//! payload, so library code reading them gets the executable's values. The
+//! same applies to anything statically linked into a Rust executable:
+//! `rlib`, `staticlib` linked via `#[link(kind = "static")]`, or in-tree
+//! workspace libraries.
 //!
-//! **Static (`rlib`) consumers read the host binary's metadata, not their own.**
-//! When a downstream rlib's `build.rs` calls
-//! `module_info::generate_project_metadata_and_linker_script()`, the resulting
-//! `cargo:rustc-link-arg=-T<linker_script>.ld` directive is not propagated
-//! transitively from the rlib to the final executable's link command, so the
-//! rlib's linker script never runs at the link step that produces the binary.
-//! Meanwhile, every `get_module_info!` call inside the rlib expands to an
-//! `extern "C" { static module_info_*: u8; }` declaration. At the final link
-//! those undefined references resolve against the executable's linker script,
-//! which defines a single set of `module_info_*` symbols pointing at the
-//! executable's `.note.package` payload. Library code reading them gets the
-//! executable's values. The same applies to anything statically linked into
-//! the consumer's final ELF: `staticlib`, `rlib`, or in-tree workspace
-//! libraries.
+//! **`staticlib` consumed by an outer (non-cargo) build can embed its own
+//! metadata.** Set [`EmbedOptions::emit_cargo_link_arg`] to `false`; the
+//! crate then writes `linker_script.ld` to `out_dir` without emitting the
+//! `cargo:rustc-link-arg` directive. The outer build (Make, CMake, MSBuild,
+//! …) passes that script to its own linker, at which point the
+//! `module_info_*` symbols are defined by the staticlib's linker script and
+//! the staticlib reads its own metadata. See "Option B" in the README for
+//! the full flow.
+//!
+//! **`cdylib` shared libraries loaded via `dlopen` are not affected.** A
+//! `cdylib` runs its own link step and applies its own linker script, so
+//! the `module_info_*` symbols inside the resulting `.so` are local to it
+//! (not exported in the dynamic symbol table). Code inside the library
+//! reads its own metadata correctly, even when the host process's main
+//! executable also embeds `.note.package`. To consume a `cdylib`'s metadata
+//! at runtime, expose an `extern "C"` accessor and call it via `dlopen`;
+//! see `examples/sample_elf_bin_with_lib` for the full pattern. Reading a
+//! library file's metadata without loading it (e.g. for crash triage) is
+//! always possible by parsing the ELF note section from the `.so` on disk.
 //!
 //! **Little-endian targets only.** The ELF note header is serialized with
 //! `u32::to_le_bytes` at `build.rs` time. Supported targets today are
