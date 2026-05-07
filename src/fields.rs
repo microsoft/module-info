@@ -39,23 +39,25 @@
 ///
 /// # Adding a new variant
 ///
-/// Adding a variant requires synchronized updates in five places. The enum
-/// `#[non_exhaustive]` + exhaustive matches in `field_value`/`to_symbol_name`/
-/// `to_key` catch most drift as compile errors, but the `get_module_info!`
-/// macro rules are token-matched and their drift only surfaces at the
-/// *consumer's* call site. Add a checklist commit or skim this list:
+/// Adding a variant requires synchronized updates in seven places across four
+/// files. The enum `#[non_exhaustive]` + exhaustive matches in
+/// `field_value`/`to_symbol_name`/`to_key` catch most drift as compile errors,
+/// but the `get_module_info!` macro rules are token-matched and their drift
+/// only surfaces at the *consumer's* call site. Skim this list:
 ///
 /// 1. This enum declaration (add the variant)
-/// 2. [`ModuleInfoField::to_symbol_name`] and [`ModuleInfoField::to_key`]
-///    match arms (compile-error on miss)
-/// 3. [`ModuleInfoField::ALL`] + `EXPECTED_VARIANT_COUNT` in the drift-guard
+/// 2. [`ModuleInfoField::to_symbol_name`] match arm (compile-error on miss)
+/// 3. [`ModuleInfoField::to_key`] match arm (compile-error on miss)
+/// 4. [`ModuleInfoField::ALL`] + `EXPECTED_VARIANT_COUNT` in the drift-guard
 ///    test (runtime failure on miss)
-/// 4. `PackageMetadata` field + `field_value` match (compile-error on miss)
-/// 5. `src/macros.rs`: both `get_module_info!` macros need a per-variant
-///    rule AND the no-arg form needs an `@__add_to_map` line. **Missing a
-///    rule here is silent: `get_module_info!(ModuleInfoField::NewField)`
-///    only fails at the consumer's call site, and a missing `@__add_to_map`
-///    line silently drops the field from the no-arg HashMap.**
+/// 5. `PackageMetadata` field + `field_value` match arm (compile-error on miss)
+/// 6. `src/macros.rs`: per-variant rule in the Linux `get_module_info!`
+///    macro AND in the non-Linux fallback macro. **Missing a rule here is
+///    silent: `get_module_info!(ModuleInfoField::NewField)` only fails at
+///    the consumer's call site.**
+/// 7. `src/macros.rs`: an `@__add_to_map` line in the no-arg form of the
+///    Linux `get_module_info!` macro. **Missing this line silently drops
+///    the field from the no-arg HashMap.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ModuleInfoField {

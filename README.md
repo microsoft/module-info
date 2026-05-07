@@ -477,7 +477,7 @@ Section Headers:
   [ 2] .note.gnu.build-i NOTE             000000000000036c  0000036c
        0000000000000024  0000000000000000   A       0     0     4
   [ 3] .note.package     NOTE             0000000000000390  00000390
-       00000000000001a6  0000000000000000   A       0     0     8
+       00000000000001a6  0000000000000000   A       0     0     4
   ...
 ```
 
@@ -545,37 +545,28 @@ mod tests {
 
 This bundles project details directly into the compiled artifact so they can be inspected via external tools, by calling `get_module_info!` at runtime, or from a crash dump.
 
-### Read a single field with `readelf -p`
+### Read a single field from a built binary
 
-Package builders and CI scripts often just need one field (e.g. `moduleVersion`) out of a built binary. `readelf -p .note.package` prints the section as printable strings, so the JSON payload falls out directly with no hex decoding and no extra tools:
-
-```sh
-$ readelf -p .note.package target/debug/sample_crashing_process
-
-String dump of section '.note.package':
-  [     0]  FDO
-  [     8]  {"binary":"sample_crashing_process","version":"0.1.0","moduleVersion":"0.1.0.0", ...}
-```
-
-Extract a single field with `jq`:
+Package builders and CI scripts often just need one field (for example, `moduleVersion`) out of a built binary. `objcopy --dump-section` writes the raw section payload, header bytes and all, to stdout; the JSON falls out directly and `jq` reads it without further massaging. This works on every binutils version the crate supports:
 
 ```sh
-$ readelf -p .note.package target/debug/sample_crashing_process \
+$ objcopy --dump-section .note.package=/dev/stdout target/debug/sample_crashing_process \
+    | tr -d '\0\n' \
     | grep -oE '\{.*\}' \
     | jq -r .moduleVersion
 0.1.0.0
 ```
 
-Or without `jq`, using plain shell:
+Or without `jq`, using plain shell. The crate emits one key:value pair per line so a line-oriented `grep` can match a single field directly without flattening:
 
 ```sh
-$ readelf -p .note.package target/debug/sample_crashing_process \
+$ objcopy --dump-section .note.package=/dev/stdout target/debug/sample_crashing_process \
     | grep -oE '"moduleVersion":"[^"]+"' \
     | cut -d'"' -f4
 0.1.0.0
 ```
 
-Binutils ≥ 2.39 also decodes the FDO Packaging Metadata note natively, so `readelf -n` alone prints the JSON on a `Packaging Metadata:` line. On older versions (e.g. Ubuntu 20.04 ships 2.34) `-n` only shows hex, so prefer `-p .note.package` for portability.
+Binutils ≥ 2.39 also decodes the FDO Packaging Metadata note natively, so `readelf -n` alone prints the JSON on a `Packaging Metadata:` line. Older `readelf -p` (binutils 2.34 ships with Ubuntu 20.04) truncates the printable-string dump mid-section once the payload exceeds an internal buffer, so the last field (often `osVersion`) is silently dropped. Prefer `objcopy --dump-section` for portability across binutils versions; reach for `readelf -n` only when you know the host has 2.39+.
 
 ```json
 $ cat target/debug/build/sample_crashing_process-<hash>/out/module_info.json

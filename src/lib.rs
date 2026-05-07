@@ -113,11 +113,16 @@ cfg_if! {
         /// # Why this is needed
         ///
         /// The note data is produced by the linker script that `build.rs` generates.
-        /// Without a source-level reference to this crate, however, cargo/rustc drops
-        /// the `module_info` rlib from the final link, and GNU ld then cannot inherit
-        /// the `SHT_NOTE` type from an input section. The output `.note.package`
-        /// becomes `SHT_PROGBITS` instead. The bytes are present, but tools like
-        /// `readelf -n` and `systemd-coredump` filter by section type and ignore it.
+        /// GNU ld assigns `SHT_NOTE` to the output `.note.package` only when an
+        /// input object file contributes a same-named input section already typed
+        /// `SHT_NOTE`; this crate provides exactly that input section through the
+        /// `#[link_section = ".note.package"]` static `PACKAGE_NOTE_SECTION`.
+        /// Without a source-level reference to this crate, cargo/rustc drops the
+        /// `module_info` rlib from the final link, no `SHT_NOTE` input section is
+        /// present, and ld synthesizes the output section from the script's
+        /// `BYTE(...)` directives alone, which yields `SHT_PROGBITS`. The bytes
+        /// are present, but tools like `readelf -n` and `systemd-coredump` filter
+        /// by section type and ignore it.
         ///
         /// Invoking `module_info::embed!()` at the crate root creates a `#[used]`
         /// reference to [`PACKAGE_NOTE_SECTION`], which forces the rlib to link and
@@ -244,7 +249,9 @@ pub struct EmbedArtifacts {
     pub linker_script_path: PathBuf,
     /// Absolute path to the raw `.note.package` binary dump.
     pub note_bin_path: PathBuf,
-    /// Absolute path to the compact JSON metadata (`module_info.json`).
+    /// Absolute path to the embedded JSON metadata (`module_info.json`). One
+    /// key:value pair per line; matches the bytes the linker script writes
+    /// into the `.note.package` descriptor (see `json` below).
     pub json_path: PathBuf,
     /// JSON string written to `module_info.json` and embedded as the note
     /// section's descriptor. One key:value pair per line (not strictly

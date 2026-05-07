@@ -14,7 +14,18 @@ fn default_lib_path() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
-    here.join("../../../sample_lib/target/debug/libsample_lib.so")
+    // Match the profile this binary was built with: a `cargo build --release`
+    // of the loader expects to find sample_lib's release artifact, not debug.
+    // `cfg!(debug_assertions)` is the standard way to discriminate at runtime
+    // without a build-script-set env var.
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    here.join(format!(
+        "../../../sample_lib/target/{profile}/libsample_lib.so"
+    ))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
