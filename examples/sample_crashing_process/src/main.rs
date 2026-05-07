@@ -135,25 +135,25 @@ fn helms_deep(signal: &str) -> Result<u32, std::io::Error> {
             match get_module_info!() {
                 Ok(all_info) => {
                     for (key, value) in &all_info {
-                        println!("{}: {}", key, value);
+                        println!("{key}: {value}");
                     }
                 }
-                Err(e) => eprintln!("Failed to get module info: {}", e),
+                Err(e) => eprintln!("Failed to get module info: {e}"),
             }
 
             // Display individual fields using the enum approach
             println!("\nUsing field-specific retrieval:");
             if let Ok(binary) = get_module_info!(ModuleInfoField::Binary) {
-                println!("Binary: {}", binary);
+                println!("Binary: {binary}");
             }
             if let Ok(version) = get_module_info!(ModuleInfoField::Version) {
-                println!("Version: {}", version);
+                println!("Version: {version}");
             }
             if let Ok(module_version) = get_module_info!(ModuleInfoField::ModuleVersion) {
-                println!("Module Version: {}", module_version);
+                println!("Module Version: {module_version}");
             }
             if let Ok(maintainer) = get_module_info!(ModuleInfoField::Maintainer) {
-                println!("Maintainer: {}", maintainer);
+                println!("Maintainer: {maintainer}");
             }
         }),
     );
@@ -193,7 +193,7 @@ fn main() -> Result<(), std::io::Error> {
     let res = longer_call_stack_func(command.as_str());
 
     // This code will only execute if the signal doesn't cause a crash
-    println!("Command execution result: {:?}", res);
+    println!("Command execution result: {res:?}");
 
     Ok(())
 }
@@ -253,7 +253,7 @@ mod tests {
         let info = get_module_info!().expect("Failed to get module info HashMap");
 
         for (key, value) in &info {
-            println!("{}: {}", key, value);
+            println!("{key}: {value}");
         }
 
         // Verify the HashMap contains the expected keys
@@ -306,47 +306,47 @@ mod tests {
         // Example of getting binary name using the enum
         match get_module_info!(ModuleInfoField::Binary) {
             Ok(binary) => {
-                println!("Binary: {}", binary);
+                println!("Binary: {binary}");
                 assert_eq!(binary, "sample_crashing_process");
             }
             Err(e) => {
-                println!("Could not get binary name: {}", e);
-                panic!("Failed to get binary name: {}", e);
+                println!("Could not get binary name: {e}");
+                panic!("Failed to get binary name: {e}");
             }
         }
 
         // Example of getting version using the enum
         match get_module_info!(ModuleInfoField::Version) {
             Ok(version) => {
-                println!("Version: {}", version);
+                println!("Version: {version}");
                 assert_version_has_parts(&version, 3, "version");
             }
             Err(e) => {
-                println!("Could not get version: {}", e);
-                panic!("Failed to get version: {}", e);
+                println!("Could not get version: {e}");
+                panic!("Failed to get version: {e}");
             }
         }
         // Example of getting maintainer using the enum
         match get_module_info!(ModuleInfoField::Maintainer) {
             Ok(maintainer) => {
-                println!("Maintainer: {}", maintainer);
+                println!("Maintainer: {maintainer}");
                 assert_eq!(maintainer, "example@contoso.com");
             }
             Err(e) => {
-                println!("Could not get maintainer: {}", e);
-                panic!("Failed to get maintainer: {}", e);
+                println!("Could not get maintainer: {e}");
+                panic!("Failed to get maintainer: {e}");
             }
         }
 
         // Example of getting module version using the enum
         match get_module_info!(ModuleInfoField::ModuleVersion) {
             Ok(module_version) => {
-                println!("Module Version: {}", module_version);
+                println!("Module Version: {module_version}");
                 assert_version_has_parts(&module_version, 4, "module version");
             }
             Err(e) => {
-                println!("Could not get module version: {}", e);
-                panic!("Failed to get module version: {}", e);
+                println!("Could not get module version: {e}");
+                panic!("Failed to get module version: {e}");
             }
         }
 
@@ -356,7 +356,7 @@ mod tests {
 
         // Print all values for debugging
         for (key, value) in &all_info {
-            println!("{}: {}", key, value);
+            println!("{key}: {value}");
         }
 
         // Verify we have expected fields in the all_info map
@@ -421,17 +421,17 @@ mod tests {
         let info = get_module_info!().expect("Failed to get module info HashMap");
 
         if let Some(branch) = info.get("branch") {
-            println!("Branch: {}", branch);
+            println!("Branch: {branch}");
             assert!(!branch.is_empty());
         }
 
         if let Some(hash) = info.get("hash") {
-            println!("Commit Hash: {}", hash);
+            println!("Commit Hash: {hash}");
             assert!(!hash.is_empty());
         }
 
         if let Some(repo) = info.get("repo") {
-            println!("Repository: {}", repo);
+            println!("Repository: {repo}");
             assert!(!repo.is_empty());
         }
     }

@@ -10,8 +10,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Executable Information:");
     let binary = get_module_info!(ModuleInfoField::Binary)?;
     let version = get_module_info!(ModuleInfoField::Version)?;
-    println!("  Binary: {}", binary);
-    println!("  Version: {}", version);
+    println!("  Binary: {binary}");
+    println!("  Version: {version}");
 
     // Demonstrate the direct accessor helpers.
     println!("  get_version(): {}", module_info::get_version()?);

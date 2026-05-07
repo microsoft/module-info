@@ -67,7 +67,7 @@ jobs:
       run: cargo test --verbose --features embed-module-info --locked
 
   examples:
-    name: Build & test example (${{ matrix.example }})
+    name: Build & test example (${{ matrix.example }}, Rust ${{ matrix.rust }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -80,6 +80,12 @@ jobs:
           - sample_builder_api
           - sample_info_api
           - sample_crashing_process
+        # Build/test each example on both stable and the MSRV. fmt + clippy
+        # only run on stable (lint output drifts between toolchains; we
+        # don't want to gate on whichever lint set 1.74 happened to ship).
+        # The MSRV cell catches MSRV regressions in example sources or
+        # their dep graphs that the main-crate `test` matrix wouldn't see.
+        rust: [stable, "1.74.0"]
     steps:
     - uses: actions/checkout@v4
       with:
@@ -87,11 +93,30 @@ jobs:
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
     - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: clippy, rustfmt
     # Examples deliberately do NOT pass `--locked`. Each example crate is a
     # standalone Cargo package and `.gitignore` excludes `examples/**/Cargo.lock`,
     # so there is no committed lockfile for `--locked` to honor; adding it
     # would fail every example job with "cannot create the lock file because
     # --locked was passed". Examples regenerate their lock fresh per build.
+    #
+    # rustfmt + clippy gate per example, stable only. The repo-root clippy
+    # job above only sees the main crate's sources because each example
+    # has its own `[workspace]` table that detaches it from the outer
+    # workspace. Without this step, clippy errors and rustfmt drift in
+    # example sources land untouched and only surface when someone runs
+    # the per-example tooling by hand. Run before `cargo build` so a
+    # malformed example fails fast.
+    - name: Rustfmt example
+      if: matrix.rust == 'stable'
+      working-directory: examples/${{ matrix.example }}
+      run: cargo fmt --check
+    - name: Clippy example
+      if: matrix.rust == 'stable'
+      working-directory: examples/${{ matrix.example }}
+      run: cargo clippy --all-targets -- -D warnings
     - name: Build example
       working-directory: examples/${{ matrix.example }}
       run: cargo build --verbose
@@ -105,6 +130,64 @@ jobs:
     - name: Test example
       working-directory: examples/${{ matrix.example }}
       run: cargo test --verbose
+
+    # Hard guard against the SHT_NOTE → SHT_PROGBITS regression. The crate's
+    # whole crash-triage value depends on `.note.package` ending up as a
+    # NOTE-typed section so `readelf -n` and `systemd-coredump` recognize
+    # it; if the rlib's `PACKAGE_NOTE_SECTION` static is dropped from the
+    # final link, GNU ld synthesizes the section from `BYTE(...)` directives
+    # alone and types it PROGBITS instead. The bytes are still there so
+    # consumers who scan strings won't notice; the CI gate is the only
+    # thing standing between that silent regression and a release.
+    #
+    # Walk every ELF artifact under `target/debug/` (binaries and `.so`s)
+    # for this example and assert each `.note.package` section is NOTE.
+    # `readelf -SW` keeps the output one-line-per-section; the awk filter
+    # picks only `.note.package` rows and reports the type column.
+    - name: Verify .note.package is SHT_NOTE
+      working-directory: examples/${{ matrix.example }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        # Walk top-level entries under target/debug only. The `target/debug/*`
+        # glob covers both binaries and `libname.so`; deps/ (per-rlib `.rlib`s,
+        # transitive `.so`s pulled in for the test runner) is intentionally
+        # skipped because those aren't artifacts we ship.
+        #
+        # ELF candidates filtered by magic bytes: first 4 bytes of an ELF are
+        # 0x7f 'E' 'L' 'F'. `head -c` reads raw bytes; the od pipeline turns
+        # them into hex for a literal compare.
+        artifacts=()
+        for path in target/debug/*; do
+          [ -f "$path" ] || continue
+          magic=$(head -c 4 "$path" | od -An -tx1 | tr -d ' \n' || true)
+          if [ "$magic" = "7f454c46" ]; then
+            artifacts+=("$path")
+          fi
+        done
+        if [ ${#artifacts[@]} -eq 0 ]; then
+          echo "::error::no ELF artifacts found under target/debug for ${{ matrix.example }}"
+          exit 1
+        fi
+        rc=0
+        for bin in "${artifacts[@]}"; do
+          # `awk '/\.note\.package/ {print $4}'` returns the section type
+          # column ("NOTE" or "PROGBITS"); fail loudly on anything but NOTE.
+          types=$(readelf -SW "$bin" | awk '/\.note\.package/ {print $4}')
+          if [ -z "$types" ]; then
+            echo "::error::$bin is missing a .note.package section"
+            rc=1
+            continue
+          fi
+          while IFS= read -r t; do
+            if [ "$t" != "NOTE" ]; then
+              echo "::error::$bin has .note.package typed as $t (expected NOTE)"
+              rc=1
+            fi
+          done <<<"$types"
+        done
+        exit $rc
 
   fmt:
     name: Rustfmt

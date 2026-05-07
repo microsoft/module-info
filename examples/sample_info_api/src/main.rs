@@ -38,10 +38,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let branch = get_module_info!(ModuleInfoField::Branch).unwrap_or_default();
     let hash = get_module_info!(ModuleInfoField::Hash).unwrap_or_default();
     let copyright = get_module_info!(ModuleInfoField::Copyright).unwrap_or_default();
-    println!("  repo:           {:?}", repo);
-    println!("  branch:         {:?}", branch);
-    println!("  hash:           {:?}", hash);
-    println!("  copyright:      {:?}", copyright);
+    println!("  repo:           {repo:?}");
+    println!("  branch:         {branch:?}");
+    println!("  hash:           {hash:?}");
+    println!("  copyright:      {copyright:?}");
 
     Ok(())
 }
