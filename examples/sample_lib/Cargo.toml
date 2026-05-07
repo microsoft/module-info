@@ -16,7 +16,7 @@ module_version_env_var_name = "BUILD_BUILDNUMBER"
 
 [lib]
 name = "sample_lib"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 module-info = { path = "../..", features = ["embed-module-info"] }

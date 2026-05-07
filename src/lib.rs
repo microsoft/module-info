@@ -25,15 +25,33 @@
 //!
 //! # Limitations
 //!
-//! **Shared libraries (`cdylib`/`dylib`) cannot reliably read their own metadata.**
-//! The linker-script symbols that [`get_module_info!`] resolves
-//! (`module_info_binary`, `module_info_version`, …) are not namespaced per
-//! crate. When a `cdylib` that embeds its own `.note.package` is loaded by an
-//! executable that also embeds one, the dynamic linker resolves both sides'
-//! references to a single definition, typically the main executable's copy.
-//! The library will read the executable's metadata, not its own. Treat the
-//! runtime API as binary-only; for shared libraries, parse the ELF note
-//! section directly from the library file instead.
+//! **Static (`rlib`) consumers read the host binary's metadata, not their own.**
+//! `cargo:rustc-link-arg=-T<linker_script>.ld` directives emitted by
+//! `module-info`'s `build.rs` are not propagated transitively from `rlib`
+//! dependencies to the final executable's link command. An `rlib` that calls
+//! [`embed!`]/[`get_module_info!`] compiles its source with *undefined*
+//! references to `module_info_binary`, `module_info_version`, etc.; at the
+//! final link those references resolve against the executable's linker
+//! script. The result is a single set of `module_info_*` symbols in the
+//! binary, all carrying the executable's metadata, and library code reading
+//! them gets the executable's values. The same applies to anything compiled
+//! into the consumer's final ELF: `staticlib`, `rlib`, or in-tree workspace
+//! libraries.
+//!
+//! **Static (`rlib`) consumers read the host binary's metadata, not their own.**
+//! When a downstream rlib's `build.rs` calls
+//! `module_info::generate_project_metadata_and_linker_script()`, the resulting
+//! `cargo:rustc-link-arg=-T<linker_script>.ld` directive is not propagated
+//! transitively from the rlib to the final executable's link command, so the
+//! rlib's linker script never runs at the link step that produces the binary.
+//! Meanwhile, every `get_module_info!` call inside the rlib expands to an
+//! `extern "C" { static module_info_*: u8; }` declaration. At the final link
+//! those undefined references resolve against the executable's linker script,
+//! which defines a single set of `module_info_*` symbols pointing at the
+//! executable's `.note.package` payload. Library code reading them gets the
+//! executable's values. The same applies to anything statically linked into
+//! the consumer's final ELF: `staticlib`, `rlib`, or in-tree workspace
+//! libraries.
 //!
 //! **Little-endian targets only.** The ELF note header is serialized with
 //! `u32::to_le_bytes` at `build.rs` time. Supported targets today are
@@ -839,56 +857,38 @@ pub fn get_module_version() -> ModuleInfoResult<String> {
     get_module_info!(ModuleInfoField::ModuleVersion)
 }
 
-/// Extract a single module info field from a linker script symbol
+/// Extract a single module-info field from a linker-script-placed symbol.
 ///
-/// This function extracts a string value from a raw pointer that is expected to point to a
-/// null-terminated C string containing a JSON string value. It parses the embedded metadata
-/// from the note section of an executable or shared library file.
+/// Reads a JSON string value (`"..."`) starting at `ptr`, terminated by NUL,
+/// and returns the bytes between the first two `"` characters.
+///
+/// Prefer the [`get_module_info!`] macro: it declares the matching extern
+/// static and forwards its address here, so the caller never holds a raw
+/// pointer.
 ///
 /// # Safety
-/// This function is unsafe because it:
-/// - Takes a raw pointer that must be a valid pointer to a null-terminated C string
-/// - Will cause undefined behavior if the pointer is invalid, dangling, or points to memory that is not properly null-terminated
-/// - Dereferencing invalid pointers can lead to memory corruption, segfaults, or security vulnerabilities
-/// - Expects the string to contain a JSON string value (surrounded by quotes) and will misbehave otherwise
+/// `ptr` must point to a valid, properly aligned, null-terminated byte
+/// sequence inside the read-only `.note.package` payload (i.e. the address
+/// of one of the `module_info_*` symbols emitted by the linker script). The
+/// memory must remain valid for the duration of the call. Passing any other
+/// pointer is undefined behavior. The internal scan is bounded by
+/// `MAX_JSON_SIZE + NOTE_ALIGN`, so a missing/corrupted section produces
+/// `MalformedJson` rather than reading off the end.
 ///
-/// # Important
-/// This function is **NOT** intended for direct use by consumers of this library.
-/// Always use the `get_module_info!` macro instead, which provides proper safety guarantees.
-///
-/// # Requirements for Safe Usage
-/// Callers must guarantee that:
-/// 1. The pointer is properly aligned and points to valid memory
-/// 2. The memory contains a valid null-terminated C string
-/// 3. The memory will remain valid for the duration of this function call
-/// 4. Only module info symbols that are statically allocated should be passed to this function
-///
-/// The `get_module_info!` macro handles all these requirements correctly by:
-/// - Only accepting static symbol identifiers declared with proper types (never arbitrary pointers)
-/// - Ensuring type safety through Rust's macro system
-/// - Maintaining a controlled set of symbols that can be passed to this function
+/// # Errors
+/// - `ModuleInfoError::NullPointer` if `ptr` is null
+/// - `ModuleInfoError::Utf8Error` if the bytes are not valid UTF-8
+/// - `ModuleInfoError::MalformedJson` if the section is missing/stripped or
+///   the value is not surrounded by `"` characters
+/// - `ModuleInfoError::NotAvailable` on non-Linux targets
 ///
 /// # Example
 /// ```rust,no_run
-/// // Direct usage with explicit imports
 /// use module_info::{get_module_info, ModuleInfoField, ModuleInfoResult};
-///
-/// // Correct usage through the macro:
-/// let binary_info: ModuleInfoResult<String> = get_module_info!(ModuleInfoField::Binary);
-///
-/// // Direct usage is unsafe and not recommended:
-/// // unsafe { extract_module_info(ptr) } // DON'T DO THIS
+/// let binary: ModuleInfoResult<String> = get_module_info!(ModuleInfoField::Binary);
 /// ```
 ///
-/// # Errors
-/// Returns specific error variants through the `ModuleInfoError` enum:
-/// - `ModuleInfoError::NullPointer` - If the pointer is null
-/// - `ModuleInfoError::Utf8Error` - If the string cannot be parsed as valid UTF-8
-/// - `ModuleInfoError::MalformedJson` - If the expected JSON string format is not found
-/// - `ModuleInfoError::NotAvailable` - If module info is not available on this platform
-///
-/// # Note
-/// This function is only available when the "embed-module-info" feature is enabled on Linux platforms.
+/// Available only when the `embed-module-info` feature is enabled on Linux.
 #[cfg(all(feature = "embed-module-info", target_os = "linux"))]
 #[must_use = "extract_module_info returns the parsed field value; discarding it defeats the point of calling it"]
 pub unsafe fn extract_module_info(ptr: *const u8) -> ModuleInfoResult<String> {

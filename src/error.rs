@@ -32,51 +32,33 @@ use cfg_if::cfg_if;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ModuleInfoError {
-    /// The module info feature is not enabled or not supported on this platform
-    ///
-    /// This error occurs when:
-    /// - The "embed-module-info" feature is not enabled in your Cargo.toml
-    /// - The code is running on a non-Linux platform
-    /// - The String contains a detailed error message explaining why module info is not available
+    /// Module info is unavailable: either the `embed-module-info` feature is
+    /// off or the target is not Linux. The contained string carries context.
     NotAvailable(String),
 
-    /// A null pointer was encountered during metadata extraction
-    ///
-    /// This error occurs when attempting to extract module info from a null pointer,
-    /// which might happen if the linker script failed to properly embed the metadata
-    /// or if the binary was stripped of its note sections.
+    /// A null pointer was passed to `extract_module_info`. Typically means
+    /// the linker script did not run or the `.note.package` section was
+    /// stripped from the binary.
     NullPointer,
 
-    /// An error occurred while parsing UTF-8 data from embedded metadata
-    ///
-    /// This error occurs when the binary contains module info that isn't valid UTF-8,
-    /// which might happen if the binary was corrupted or if there was an issue during
-    /// the build process.
+    /// The embedded bytes were not valid UTF-8.
     Utf8Error(std::str::Utf8Error),
 
-    /// A malformed JSON string was encountered in the embedded metadata
-    ///
-    /// This error occurs when the extracted metadata string doesn't follow the expected
-    /// JSON format. The String contains details about what specific formatting issue was found.
+    /// The embedded JSON could not be parsed, a required field is missing
+    /// or empty, or `moduleVersion` is not four `u16`-sized parts. The
+    /// contained string identifies the specific failure.
     MalformedJson(String),
 
-    /// Error when generated metadata exceeds the maximum allowed size
-    ///
-    /// This occurs when the generated metadata JSON is larger than the maximum allowed size.
-    /// See `MAX_JSON_SIZE` (1 KiB) for the current limit, which keeps the note section compact.
-    /// The String contains a message with more details about the size limitation.
+    /// The serialized metadata JSON exceeded `MAX_JSON_SIZE` (1 KiB) at
+    /// build time. The contained string reports the actual vs. allowed size.
     MetadataTooLarge(String),
 
-    /// An IO error occurred while reading or writing metadata
-    ///
-    /// This typically happens during build time when generating the linker script or
-    /// reading from Cargo.toml. The contained error provides more details about what went wrong.
+    /// I/O failure while reading `Cargo.toml` or writing the generated
+    /// linker script and JSON dump from `build.rs`.
     IoError(std::io::Error),
 
-    /// Any other errors that don't fit into the above categories
-    ///
-    /// This is a catch-all error for unexpected issues. The boxed error contains
-    /// the original error that occurred.
+    /// Catch-all for errors that do not fit the variants above. Holds the
+    /// originating error for `source()` chaining.
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 

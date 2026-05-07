@@ -39,11 +39,14 @@ the main feature, not the point of the crate.
   version, and Cargo-package metadata (version, maintainer, copyright).
 - Embeds metadata in both executables and shared libraries; the
   `.note.package` section is always present in either ELF type, so a core
-  dump from either contains the metadata. (Note: the runtime
-  `get_module_info!` accessor is reliable only from the main binary; a
-  shared library reading its *own* metadata at runtime sees the executable's
-  copy due to global symbol resolution. Parse the ELF note section directly
-  if you need a library's own metadata at runtime.)
+  dump from either contains the metadata. The runtime `get_module_info!`
+  accessor reads the *current ELF module's* note section: a `cdylib` loaded
+  via `dlopen` reads its own metadata correctly, but an `rlib` (or any code
+  statically linked into the final executable) reads the executable's
+  values, since `module-info`'s linker-script directive is not propagated
+  from `rlib` deps to the consumer's final link. Parse the ELF note section
+  from the file on disk if you need a statically linked library's own
+  metadata at runtime.
 - Build-time only: zero runtime cost on the hot path; the runtime accessor
   is opt-in via the `embed-module-info` feature.
 
@@ -619,17 +622,18 @@ The crates under `examples/` are **standalone Cargo packages**, not `cargo`
 examples. Each has its own `Cargo.toml` and `build.rs`; build them from their
 own directories:
 
-1. `sample_lib`: shared library (cdylib+rlib) example showing how to:
-   - Embed metadata into a shared library
-   - Access metadata from within the library
-   - Write tests for metadata validation
+1. `sample_lib`: `cdylib` shared library that embeds `.note.package` and
+   exposes `extern "C"` accessors so a `dlopen`-based loader can read the
+   library's own metadata at runtime.
 
 2. `sample_elf_bin`: ELF binary example showing how to:
    - Embed metadata into an executable
    - Access it via `get_module_info!`, `get_version()`, and `get_module_version()`
 
-3. `sample_elf_bin_with_lib`: ELF binary that links `sample_lib` and
-   demonstrates reading both the executable's and the library's metadata.
+3. `sample_elf_bin_with_lib`: ELF binary that loads `sample_lib`'s `.so` via
+   `dlopen` and reads both the executable's and the library's own
+   `.note.package` data, demonstrating that `cdylib` self-reads work even
+   when the host executable also embeds `.note.package`.
 
 4. `sample_crashing_process`: tool that deliberately crashes with various signals so
    you can verify the `.note.package` section is preserved in the resulting
@@ -654,6 +658,15 @@ Build and run (from the `module_info` crate root):
 $ cargo build --manifest-path examples/sample_elf_bin/Cargo.toml
 $ ./examples/sample_elf_bin/target/debug/sample_elf_bin
 $ readelf -n ./examples/sample_elf_bin/target/debug/sample_elf_bin
+```
+
+`sample_elf_bin_with_lib` loads `libsample_lib.so` via `dlopen`, so build
+`sample_lib` first:
+
+```bash
+$ cargo build --manifest-path examples/sample_lib/Cargo.toml
+$ cargo build --manifest-path examples/sample_elf_bin_with_lib/Cargo.toml
+$ ./examples/sample_elf_bin_with_lib/target/debug/sample_elf_bin_with_lib
 ```
 
 Each example has its own `build.rs` and links like any downstream consumer,

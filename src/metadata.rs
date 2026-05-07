@@ -493,7 +493,7 @@ pub(crate) fn project_metadata() -> ModuleInfoResult<(String, String)> {
 /// with `MetadataTooLarge`, glyph expansion is the likely cause.
 ///
 /// The glyph map is intentionally minimal (©, ®, ™). Other non-ASCII glyphs
-/// that might appear in author or copyright fields (em dash (`—`), curly
+/// that might appear in author or copyright fields (U+2014 em-dash (`—`), curly
 /// quotes (`“ ”`), section (`§`), accented Latin letters (`André`), or any
 /// CJK text) are dropped rather than transliterated. Expand the map if a
 /// legitimate field is losing characters, and update the
