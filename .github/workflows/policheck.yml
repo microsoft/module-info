@@ -24,7 +24,7 @@ jobs:
     name: Repo text scan (pre-flight)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # PR jobs may run untrusted code in subsequent steps; clear the
           # workflow token from `.git/config` defensively.

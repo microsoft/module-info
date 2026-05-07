@@ -40,7 +40,7 @@ jobs:
         rust: [stable, "1.74.0"]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -87,7 +87,7 @@ jobs:
         # their dep graphs that the main-crate `test` matrix wouldn't see.
         rust: [stable, "1.74.0"]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -202,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -217,7 +217,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -242,7 +242,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-Dwarnings"
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -263,7 +263,7 @@ jobs:
     # upload step after the `cargo llvm-cov` invocation; intentionally
     # left out here to avoid requiring a third-party token.
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -303,7 +303,7 @@ jobs:
           cargo llvm-cov report --summary-only
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: coverage-lcov
         path: lcov.info
@@ -316,7 +316,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -346,12 +346,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: DavidAnson/markdownlint-cli2-action@992badcdf24e3b8eb7e87ff9287fe931bcb00c6e # v20.0.0
+    - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
       with:
         globs: "**/*.md"
 
@@ -360,7 +360,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -377,7 +377,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
