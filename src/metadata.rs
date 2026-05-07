@@ -506,7 +506,7 @@ pub(crate) fn project_metadata() -> ModuleInfoResult<(String, String)> {
 /// `/* ... */` comment without escaping `*/` first.
 ///
 /// # Example
-/// `"Microsoft©"` → `"Microsoft(c)"`; `"a\"b\nc"` → `"abc"`.
+/// `"Contoso©"` → `"Contoso(c)"`; `"a\"b\nc"` → `"abc"`.
 pub fn sanitize_for_linker_script(input: &str) -> String {
     input
         .replace('©', "(c)")
@@ -692,7 +692,7 @@ mod tests {
         //   `.replace()` so it's immune; the test pins that contract.
         let inputs = [
             "Contoso© Fabrikam® Widgets™ / path*/here",
-            "Copyright (c) Contoso (2024) — (r) (tm)",
+            "Copyright (c) Contoso (2024), (r) (tm)",
             "(c)(r)(tm) only",
             "",
         ];

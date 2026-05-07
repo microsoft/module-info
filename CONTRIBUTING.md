@@ -40,11 +40,11 @@ We welcome feature suggestions! Please use the feature request template and prov
 ### Pull Requests
 
 1. Fork the repository
-2. Create a new branch (`git checkout -b feature/amazing-feature`)
+2. Create a topic branch (`git checkout -b <your-branch-name>`)
 3. Make your changes
 4. Run tests locally (`cargo test`)
-5. Commit your changes (`git commit -m 'Add some amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
+5. Commit your changes with a descriptive message
+6. Push the branch to your fork (`git push origin <your-branch-name>`)
 7. Open a Pull Request using the PR template
 
 ### Development Workflow

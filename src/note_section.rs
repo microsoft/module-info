@@ -61,7 +61,7 @@ impl NoteSection {
         if n_namesz < 4 {
             return Err(crate::ModuleInfoError::Other(
                 format!(
-                    "n_namesz={n_namesz} looks wrong — the FDO-packaged owner name is 4 bytes (\"FDO\\0\")"
+                    "n_namesz={n_namesz} looks wrong: the FDO-packaged owner name is 4 bytes (\"FDO\\0\")"
                 )
                 .into(),
             ));

@@ -38,7 +38,7 @@ pub(crate) fn bytes_to_linker_directives(bytes: &[u8]) -> String {
 /// "returned value is >= len" post-condition). Saturating to `u32::MAX` lets
 /// downstream size checks (e.g. `MAX_JSON_SIZE`) notice a too-large input
 /// instead of silently corrupting the `.note.package` layout.
-pub fn align_len(len: u32, align: usize) -> u32 {
+pub(crate) fn align_len(len: u32, align: usize) -> u32 {
     debug_assert!(align.is_power_of_two(), "align must be a power of two");
     let align_u32 = u32::try_from(align).unwrap_or(u32::MAX);
     let mask = align_u32.saturating_sub(1);

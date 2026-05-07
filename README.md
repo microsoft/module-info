@@ -409,7 +409,7 @@ When enabled (value set to "true", case-insensitive), the `debug!` macro will ou
 ```toml
 [package]
 name = "sample_crashing_process"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 authors = ["Team Name <example@contoso.com>"]
@@ -501,13 +501,13 @@ $ strings ./sample_crashing_process | grep -A 12 '"binary"'
 "binary": "sample_crashing_process",
 "moduleVersion": "0.1.0.0",
 "version": "0.1.0",
-"maintainer": "<GUID or maintainer contact email>",
+"maintainer": "example@contoso.com",
 "name": "sample_crashing_process",
-"type": "agent",
-"repo": "Project_Repository_Name",
-"branch": "feature/addSomething",
+"type": "tool",
+"repo": "module-info",
+"branch": "main",
 "hash": "9fbf13be41d9c29f056588f6ef97509e534a51f5",
-"copyright": "Microsoft",
+"copyright": "Contoso, Ltd.",
 "os": "ubuntu",
 "osVersion": "20.04"
 ```
@@ -551,7 +551,7 @@ $ readelf -p .note.package target/debug/sample_crashing_process
 
 String dump of section '.note.package':
   [     0]  FDO
-  [     8]  {"binary":"sample_crashing_process","version":"0.1.2","moduleVersion":"0.1.2.0", ...}
+  [     8]  {"binary":"sample_crashing_process","version":"0.1.0","moduleVersion":"0.1.0.0", ...}
 ```
 
 Extract a single field with `jq`:
@@ -560,7 +560,7 @@ Extract a single field with `jq`:
 $ readelf -p .note.package target/debug/sample_crashing_process \
     | grep -oE '\{.*\}' \
     | jq -r .moduleVersion
-0.1.2.0
+0.1.0.0
 ```
 
 Or without `jq`, using plain shell:
@@ -569,7 +569,7 @@ Or without `jq`, using plain shell:
 $ readelf -p .note.package target/debug/sample_crashing_process \
     | grep -oE '"moduleVersion":"[^"]+"' \
     | cut -d'"' -f4
-0.1.2.0
+0.1.0.0
 ```
 
 Binutils ≥ 2.39 also decodes the FDO Packaging Metadata note natively, so `readelf -n` alone prints the JSON on a `Packaging Metadata:` line. On older versions (e.g. Ubuntu 20.04 ships 2.34) `-n` only shows hex, so prefer `-p .note.package` for portability.
@@ -580,13 +580,13 @@ $ cat target/debug/build/sample_crashing_process-<hash>/out/module_info.json
 "binary": "sample_crashing_process",
 "moduleVersion": "0.1.0.0",
 "version": "0.1.0",
-"maintainer": "<GUID or maintainer contact email>",
+"maintainer": "example@contoso.com",
 "name": "sample_crashing_process",
-"type": "agent",
-"repo": "Project_Repository_Name",
-"branch": "feature/addSomething",
+"type": "tool",
+"repo": "module-info",
+"branch": "main",
 "hash": "ea43550c8868fe6ac0bd2b5b91970276d6586dc1",
-"copyright": "Microsoft",
+"copyright": "Contoso, Ltd.",
 "os": "ubuntu",
 "osVersion": "20.04"
 }

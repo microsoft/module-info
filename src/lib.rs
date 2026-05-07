@@ -753,8 +753,10 @@ pub fn generate_project_metadata_and_linker_script() -> Result<(), Box<dyn std::
 /// # Errors
 ///
 /// This function will return an error in the following situations:
-/// - If more than half of the module info fields are null pointers, suggesting the metadata is missing
-///   or corrupted (returns `ModuleInfoError::NotAvailable`)
+/// - If any of the seven required identity-plus-platform fields (`binary`,
+///   `version`, `moduleVersion`, `name`, `maintainer`, `os`, `osVersion`) is
+///   missing or empty, suggesting the metadata is missing or corrupted
+///   (returns `ModuleInfoError::NotAvailable`)
 /// - If running on a non-Linux platform where module info isn't supported (returns `ModuleInfoError::NotAvailable`)
 ///
 /// # Note

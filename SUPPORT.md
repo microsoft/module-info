@@ -10,4 +10,4 @@ For help and questions about using this project, please file a GitHub Issue.
 
 ## Microsoft Support Policy
 
-Support for Module Info is limited to the resources listed above.
+Support for `module-info` is limited to the resources listed above.
