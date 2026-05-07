@@ -39,6 +39,16 @@
 **/target/
 **/*.rs.bk
 
+# LLVM source-based coverage intermediates. `cargo llvm-cov` sets
+# LLVM_PROFILE_FILE so its own runs land under `target/`, but an
+# instrumented binary run outside that wrapper (stale binary picked up
+# by `cargo test` after RUSTFLAGS changed, sub-process that lost the
+# env var, etc.) falls back to LLVM's default: `default_<id>_*.profraw`
+# in cwd. Catch them anywhere in the tree so they don't slip into a
+# whitelisted subdir.
+**/*.profraw
+**/*.profdata
+
 # Example crates each have their own Cargo.lock; don't track them.
 examples/**/Cargo.lock
 
