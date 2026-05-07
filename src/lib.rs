@@ -911,57 +911,62 @@ pub unsafe fn extract_module_info(ptr: *const u8) -> ModuleInfoResult<String> {
         return Err(ModuleInfoError::NullPointer);
     }
 
+    // Single-pass scan: walk forward looking for the opening `"` and then
+    // the closing `"` of the JSON value. Exits as soon as both are found,
+    // so a healthy field read costs O(value_len) rather than walking the
+    // entire `.note.package` payload to the trailing NUL. The cap still
+    // bounds the worst case so a stripped/missing/corrupted section can't
+    // read off the end of the mapped region.
+    //
+    // Why `MAX_JSON_SIZE + NOTE_ALIGN`: pre-refactor the scan went all
+    // the way to NUL (the JSON body up to `MAX_JSON_SIZE` plus the
+    // `1..=NOTE_ALIGN` padding). The new short-circuit only walks to the
+    // closing `"`, but keeping the same upper bound preserves the prior
+    // worst-case safety margin at no correctness cost.
+    const MAX_NOTE_VALUE_LEN: usize = constants::MAX_JSON_SIZE + constants::NOTE_ALIGN;
+
     // SAFETY: Caller (via `get_module_info!`) passes the address of an
     // `extern "C" static: u8` placed by the linker script inside the
-    // `.note.package` payload (read-only for program lifetime, never mutated).
-    // Scan forward until NUL; the cap ensures a stripped/missing/corrupted
-    // section can't read off the end.
-    //
-    // Why `MAX_JSON_SIZE + NOTE_ALIGN`: the worst-case symbol sits at byte 0
-    // of the first JSON value, so the scan may have to walk the full JSON body
-    // (up to `MAX_JSON_SIZE` bytes) plus the `1..=NOTE_ALIGN` NUL padding that
-    // `render_note_payloads` always emits after the closing `}` (see
-    // metadata.rs). Using `+ NOTE_ALIGN` (not `+ 1`) keeps the bound
-    // independent of the exact padding count at no correctness cost.
-    const MAX_NOTE_VALUE_LEN: usize = constants::MAX_JSON_SIZE + constants::NOTE_ALIGN;
-    let mut length = 0;
-
-    while length < MAX_NOTE_VALUE_LEN {
-        let byte = unsafe { *ptr.add(length) };
+    // `.note.package` payload (read-only for program lifetime, never
+    // mutated). The loop is bounded by `MAX_NOTE_VALUE_LEN`, so a
+    // stripped/missing/corrupted section produces an error rather than
+    // walking off the end of the mapped region.
+    let mut open_quote: Option<usize> = None;
+    for i in 0..MAX_NOTE_VALUE_LEN {
+        let byte = unsafe { *ptr.add(i) };
         if byte == 0 {
-            break;
+            // NUL before the closing quote means the value was truncated
+            // or the section is malformed (sanitization strips embedded
+            // NULs from every embedded value at build time).
+            return Err(ModuleInfoError::MalformedJson(
+                "Unexpected NUL before closing quote of JSON value".to_string(),
+            ));
         }
-        length += 1;
+        if byte == b'"' {
+            match open_quote {
+                None => open_quote = Some(i),
+                Some(open) => {
+                    // Found both quotes. Bytes between are the value.
+                    // Sanitization strips `"` and `\` from values at embed
+                    // time, so a direct slice between the quotes is
+                    // sufficient (no JSON escapes to unescape).
+                    let len = i - open - 1;
+                    let bytes = unsafe { std::slice::from_raw_parts(ptr.add(open + 1), len) };
+                    let value = std::str::from_utf8(bytes)?;
+                    return Ok(value.to_string());
+                }
+            }
+        }
     }
 
-    if length >= MAX_NOTE_VALUE_LEN {
-        // Cap hit: the section is absent, stripped, or corrupted. Surface
-        // that instead of a misleading "string too long" error.
-        return Err(ModuleInfoError::MalformedJson(format!(
-            "No NUL terminator found within {MAX_NOTE_VALUE_LEN} bytes; \
-             .note.package section is missing, stripped, or corrupted"
-        )));
-    }
-
-    let bytes = unsafe { std::slice::from_raw_parts(ptr, length) };
-    let str_slice = std::str::from_utf8(bytes)?;
-
-    // Symbol is placed just before the opening `"` of a JSON string literal.
-    // Sanitization strips `"` and `\` from values, so a direct slice between
-    // the first two quotes is sufficient (no JSON escapes to unescape).
-    let open_quote = str_slice
-        .find('"')
-        .ok_or_else(|| ModuleInfoError::MalformedJson("Missing opening quote".to_string()))?;
-    let value_start = open_quote + 1;
-    let close_quote_offset = str_slice
-        .get(value_start..)
-        .and_then(|s| s.find('"'))
-        .ok_or_else(|| ModuleInfoError::MalformedJson("Missing closing quote".to_string()))?;
-    let value_end = value_start + close_quote_offset;
-    let value = str_slice
-        .get(value_start..value_end)
-        .ok_or_else(|| ModuleInfoError::MalformedJson("Value span out of bounds".to_string()))?;
-    Ok(value.to_string())
+    // Cap hit without finding both quotes; the section is absent,
+    // stripped, or corrupted. Surface the diagnostic instead of a
+    // misleading "missing closing quote" error so build-vs-runtime
+    // problems are easy to triage in core dumps.
+    Err(ModuleInfoError::MalformedJson(format!(
+        "No closing quote found within {MAX_NOTE_VALUE_LEN} bytes; \
+         .note.package section is missing, stripped, or corrupted"
+    )))
 }
 
 /// Non-Linux stub of [`extract_module_info`]. Always returns
@@ -1027,11 +1032,205 @@ mod tests {
         Ok(())
     }
 
+    /// Lock in the early-exit refactor: a value followed by a long
+    /// non-NUL trailer must still return only the bytes between the
+    /// quotes. Pre-refactor the function walked all the way to NUL; the
+    /// new implementation should never read past the closing quote, so
+    /// the trailer never affects the parsed value.
+    #[cfg(feature = "embed-module-info")]
+    #[test]
+    fn extract_module_info_stops_at_closing_quote() -> TestResult {
+        // `"hello",\n"version":..." then NUL: a snapshot of how the
+        // bytes look in a real `.note.package` payload between fields.
+        let bytes: Vec<u8> = b"\"hello\",\n\"version\":\"1.2.3\"\0".to_vec();
+        // SAFETY: the vec lives for the duration of the `unsafe` block
+        // and is NUL-terminated within MAX_NOTE_VALUE_LEN.
+        let value = unsafe { extract_module_info(bytes.as_ptr()) }?;
+        assert_eq!(
+            value, "hello",
+            "scan must stop at the closing quote, not walk past into the next field"
+        );
+        Ok(())
+    }
+
+    /// A NUL byte before any quote (e.g., the section was stripped or
+    /// the symbol resolved against zeroed memory) must surface as
+    /// `MalformedJson`, not silently return an empty string.
+    #[cfg(feature = "embed-module-info")]
+    #[test]
+    fn extract_module_info_rejects_leading_nul() {
+        let bytes: [u8; 4] = [0, 0, 0, 0];
+        match unsafe { extract_module_info(bytes.as_ptr()) } {
+            Err(ModuleInfoError::MalformedJson(msg)) => assert!(
+                msg.contains("NUL"),
+                "error must mention the NUL trigger: {msg}"
+            ),
+            other => panic!("expected MalformedJson(...NUL...), got {other:?}"),
+        }
+    }
+
+    /// A buffer with an opening quote but no closing quote within the
+    /// cap should report the cap-hit diagnostic, not a generic "missing
+    /// quote" error. This is the path that fires when the section was
+    /// stripped from the binary at link time.
+    #[cfg(feature = "embed-module-info")]
+    #[test]
+    fn extract_module_info_reports_cap_on_runaway_scan() {
+        // 2 KB of `'a'` bytes (well over MAX_JSON_SIZE = 1024 +
+        // NOTE_ALIGN = 4) with one opening quote at byte 0 and no
+        // closing quote anywhere in the cap.
+        let mut bytes = vec![b'a'; 2048];
+        bytes[0] = b'"';
+        match unsafe { extract_module_info(bytes.as_ptr()) } {
+            Err(ModuleInfoError::MalformedJson(msg)) => assert!(
+                msg.contains("missing, stripped, or corrupted"),
+                "cap-hit error must keep the diagnostic phrasing: {msg}"
+            ),
+            other => panic!("expected MalformedJson(...corrupted...), got {other:?}"),
+        }
+    }
+
     #[test]
     fn test_align_len() {
         assert_eq!(utils::align_len(5, NOTE_ALIGN), 8);
         assert_eq!(utils::align_len(8, NOTE_ALIGN), 8);
         assert_eq!(utils::align_len(9, NOTE_ALIGN), 12);
+    }
+
+    /// Locks in the saturating-overflow contract for `align_len`: when
+    /// `len + (align - 1)` would overflow `u32`, the function must
+    /// saturate to `u32::MAX` (so downstream size checks notice) rather
+    /// than wrap to a value below `len` (which the older naive
+    /// implementation did, silently corrupting the `.note.package`
+    /// layout). Without this test the `None => u32::MAX` arm is dead
+    /// code per llvm-cov.
+    #[test]
+    fn align_len_saturates_on_u32_overflow() {
+        // u32::MAX + 3 (mask for align=4) overflows; must saturate.
+        assert_eq!(utils::align_len(u32::MAX, 4), u32::MAX);
+        // u32::MAX is already aligned to 1, so the add doesn't overflow
+        // there; pick a value where the carry actually fires.
+        assert_eq!(utils::align_len(u32::MAX - 1, 4), u32::MAX);
+    }
+
+    /// `NoteSection::new` rejects any owner string whose name+NUL
+    /// length is below 4 bytes. The check is a guard against a swapped
+    /// or empty owner accidentally producing a malformed note in
+    /// release-mode build scripts (where `debug_assert!` would no-op).
+    /// Without this test the `n_namesz < 4` arm is dead code per
+    /// llvm-cov.
+    #[test]
+    fn note_section_rejects_short_owner() {
+        use crate::note_section::NoteSection;
+        // Empty owner: namesz = 0 + 1 (NUL) = 1, < 4.
+        // `NoteSection` doesn't impl `Debug`, so `.expect_err(...)` is
+        // unavailable and we have to match explicitly.
+        match NoteSection::new(N_TYPE, "", "desc", "", NOTE_ALIGN) {
+            Err(ModuleInfoError::Other(boxed)) => assert!(
+                boxed.to_string().contains("n_namesz"),
+                "diagnostic must name the field: {boxed}"
+            ),
+            Err(other) => panic!("expected Other(...n_namesz...), got {other:?}"),
+            Ok(_) => panic!("empty owner must be rejected"),
+        }
+        // Two-byte owner: namesz = 2 + 1 = 3, still < 4.
+        match NoteSection::new(N_TYPE, "AB", "desc", "", NOTE_ALIGN) {
+            Err(ModuleInfoError::Other(_)) => {}
+            Err(other) => panic!("expected Other(_), got {other:?}"),
+            Ok(_) => panic!("two-byte owner must be rejected"),
+        }
+    }
+
+    /// `validate_embedded_json` rejects payloads larger than
+    /// `MAX_JSON_SIZE`. The cap exists because the `.note.package`
+    /// payload limit is documented as 1 KiB; without this test the
+    /// `MetadataTooLarge` arm of `embed_package_metadata`'s call to
+    /// `validate_embedded_json` is dead code per llvm-cov.
+    #[test]
+    fn validate_embedded_json_rejects_oversized_payload() {
+        // Build a JSON payload over MAX_JSON_SIZE by stuffing a single
+        // string field. The shape doesn't have to be valid metadata;
+        // the size check fires first.
+        let big_value = "x".repeat(constants::MAX_JSON_SIZE + 16);
+        let json = format!(r#"{{"binary":"{big_value}"}}"#);
+        let err = validate_embedded_json(&json)
+            .expect_err("payloads over MAX_JSON_SIZE must be rejected");
+        match err {
+            ModuleInfoError::MetadataTooLarge(msg) => assert!(
+                msg.contains("exceeds limit"),
+                "diagnostic must mention the cap: {msg}"
+            ),
+            other => panic!("expected MetadataTooLarge, got {other:?}"),
+        }
+    }
+
+    /// `validate_embedded_json` rejects non-object JSON shapes. The
+    /// `is_object()` branch fires for arrays / scalars / etc.; without
+    /// a focused test this arm is uncovered per llvm-cov even though
+    /// the runtime risk (someone hand-crafting a bad payload through
+    /// the builder API) is real.
+    #[test]
+    fn validate_embedded_json_rejects_non_object_shapes() {
+        for bad in ["[]", "null", "42", r#""string""#] {
+            let err = validate_embedded_json(bad).expect_err("non-object JSON must be rejected");
+            assert!(
+                matches!(err, ModuleInfoError::MalformedJson(_)),
+                "expected MalformedJson for {bad:?}"
+            );
+        }
+    }
+
+    /// `module_info::new(Info { … })` is the one-call entry point. The
+    /// existing `info_embed_round_trip_writes_artifacts` test goes
+    /// directly through `embed_package_metadata` instead of through
+    /// `new`, so the `new` body itself stays uncovered. Exercise it
+    /// here. The function reads `OUT_DIR` (because `EmbedOptions`
+    /// defaults to `out_dir = None`), so set a temp directory before
+    /// the call and restore the prior value after.
+    ///
+    /// This is the *only* test that touches the process-global env;
+    /// keeping it self-contained avoids racing the rest of the suite,
+    /// which uses explicit `out_dir` overrides.
+    #[cfg(feature = "embed-module-info")]
+    #[test]
+    fn new_one_call_entry_point_writes_artifacts() -> TestResult {
+        use std::sync::Mutex;
+        // Single global lock around `OUT_DIR` mutation: every test that
+        // touches process-global env must serialize, otherwise parallel
+        // test execution will see stale values. We're the only mutator
+        // today, but the lock makes that contract explicit.
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let tmp = tempfile::tempdir()?;
+        let prior = std::env::var_os("OUT_DIR");
+        // SAFETY: `set_var`/`remove_var` are `unsafe` on Rust 1.80+ but
+        // safe on the MSRV (1.74). Use the safe API; CI's stable cell
+        // will warn but not fail because the deprecation is `unsafe`,
+        // not a compile error.
+        std::env::set_var("OUT_DIR", tmp.path());
+        let result = new(Info {
+            binary: "one_call_test".into(),
+            name: "one_call_test".into(),
+            version: "1.0.0".into(),
+            moduleVersion: "1.0.0.0".into(),
+            maintainer: "team@contoso.com".into(),
+            os: "linux".into(),
+            osVersion: "test".into(),
+            ..Default::default()
+        });
+        match prior {
+            Some(p) => std::env::set_var("OUT_DIR", p),
+            None => std::env::remove_var("OUT_DIR"),
+        }
+
+        let artifacts = result?;
+        // The artifacts must land under the OUT_DIR we set.
+        assert!(artifacts.linker_script_path.starts_with(tmp.path()));
+        assert!(artifacts.json_path.exists());
+        let parsed: serde_json::Value = serde_json::from_str(&artifacts.json)?;
+        assert_eq!(parsed["binary"], "one_call_test");
+        Ok(())
     }
 
     #[test]

@@ -126,3 +126,124 @@ cfg_if! {
 
 /// A type alias for Results that use ModuleInfoError
 pub type ModuleInfoResult<T> = Result<T, ModuleInfoError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    /// Sweep every variant once: build it, run `Display::fmt`, and call
+    /// `Error::source`. Together this exercises every match arm in
+    /// `Display::fmt` and every arm in `source()` that returns a
+    /// concrete error vs. `None`. Without it `error.rs` shows 0%
+    /// coverage in `cargo llvm-cov` because variants are *constructed*
+    /// elsewhere via `?`/`From` impls but never *displayed*.
+    #[test]
+    fn display_and_source_cover_every_variant() {
+        // Use a runtime-built byte slice so `clippy::invalid_utf8_in_unchecked`
+        // (and the related `invalid-from-utf8` lint that fires on a literal
+        // `&[0xff]`) doesn't flag the test as obviously-erroring at compile
+        // time. The bytes are still always invalid UTF-8 at runtime.
+        let invalid_utf8: Vec<u8> = vec![0xff, 0xfe];
+        let utf8_err = match std::str::from_utf8(&invalid_utf8) {
+            Ok(_) => unreachable!("invalid_utf8 is never valid UTF-8"),
+            Err(e) => e,
+        };
+
+        // For each variant, assert (a) Display produces a non-empty
+        // string with the expected prefix, and (b) `source()` returns
+        // Some/None per the doc contract.
+        let cases: Vec<(ModuleInfoError, &str, bool)> = vec![
+            (
+                ModuleInfoError::NotAvailable("ctx".into()),
+                "Module info not available",
+                false,
+            ),
+            (ModuleInfoError::NullPointer, "Pointer is null", false),
+            (
+                ModuleInfoError::MalformedJson("bad".into()),
+                "Malformed JSON string",
+                false,
+            ),
+            (
+                ModuleInfoError::MetadataTooLarge("size".into()),
+                "Metadata size exceeds limit",
+                false,
+            ),
+            // Variants whose source() returns the inner error:
+            (
+                ModuleInfoError::Utf8Error(utf8_err),
+                "UTF-8 conversion error",
+                true,
+            ),
+            (
+                ModuleInfoError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "missing",
+                )),
+                "IO error",
+                true,
+            ),
+            (
+                ModuleInfoError::Other(std::io::Error::other("boxed").into()),
+                "Other error",
+                true,
+            ),
+        ];
+        for (err, prefix, has_source) in cases {
+            let rendered = format!("{err}");
+            assert!(
+                rendered.starts_with(prefix),
+                "Display for {err:?} should start with {prefix:?}, got {rendered:?}"
+            );
+            assert_eq!(
+                err.source().is_some(),
+                has_source,
+                "source() arm wrong for {err:?}"
+            );
+        }
+    }
+
+    /// `From<std::str::Utf8Error>` and `From<std::io::Error>` are the
+    /// auto-conversions `?` exercises throughout the crate. Hit them
+    /// directly here so coverage doesn't silently drop if a future
+    /// refactor stops using `?` against those error types in the
+    /// production paths these tests instrument.
+    #[test]
+    fn from_impls_wrap_into_correct_variant() {
+        let invalid_utf8: Vec<u8> = vec![0xff];
+        let utf8_err = match std::str::from_utf8(&invalid_utf8) {
+            Ok(_) => unreachable!("invalid_utf8 is never valid UTF-8"),
+            Err(e) => e,
+        };
+        let wrapped: ModuleInfoError = utf8_err.into();
+        assert!(matches!(wrapped, ModuleInfoError::Utf8Error(_)));
+
+        let io_err = std::io::Error::other("x");
+        let wrapped: ModuleInfoError = io_err.into();
+        assert!(matches!(wrapped, ModuleInfoError::IoError(_)));
+
+        // VarError uses the catch-all `Other` arm, not a dedicated
+        // variant. Pin that contract so a refactor doesn't accidentally
+        // promote it to its own variant without updating callers.
+        let var_err = std::env::VarError::NotPresent;
+        let wrapped: ModuleInfoError = var_err.into();
+        assert!(matches!(wrapped, ModuleInfoError::Other(_)));
+    }
+
+    /// On Linux, `toml::de::Error` and `serde_json::Error` also have
+    /// `From` impls (used by `Cargo.toml` parsing and JSON validation).
+    /// Cover those arms too. Gated on Linux because the impls are
+    /// `#[cfg(target_os = "linux")]`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_from_impls_wrap_into_other() {
+        let toml_err = toml::from_str::<toml::Value>("not [valid").unwrap_err();
+        let wrapped: ModuleInfoError = toml_err.into();
+        assert!(matches!(wrapped, ModuleInfoError::Other(_)));
+
+        let json_err = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let wrapped: ModuleInfoError = json_err.into();
+        assert!(matches!(wrapped, ModuleInfoError::Other(_)));
+    }
+}

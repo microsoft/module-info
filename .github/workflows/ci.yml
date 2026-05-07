@@ -144,7 +144,15 @@ jobs:
     # for this example and assert each `.note.package` section is NOTE.
     # `readelf -SW` keeps the output one-line-per-section; the awk filter
     # picks only `.note.package` rows and reports the type column.
+    #
+    # Stable-only: section type is determined by the linker script and
+    # the binutils version on the runner, not by rustc. Running this
+    # check twice (once per matrix toolchain) is pure duplication; the
+    # MSRV cell still verifies the same artifact via the parser-based
+    # `tests/note_section.rs` integration tests next door, which DO
+    # depend on the toolchain being able to compile the test code.
     - name: Verify .note.package is SHT_NOTE
+      if: matrix.rust == 'stable'
       working-directory: examples/${{ matrix.example }}
       shell: bash
       run: |
@@ -242,6 +250,66 @@ jobs:
     - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
     - name: Generate documentation
       run: cargo doc --no-deps --features embed-module-info --locked
+
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Reporting-only: a coverage drop should be visible in the PR but
+    # shouldn't block a merge. Threshold-based gates create churn from
+    # incidental refactors. Surfaced via the workflow summary + an
+    # uploaded `lcov.info` artifact so reviewers can drill in if needed.
+    # Codecov / Coveralls integration can layer on top by adding an
+    # upload step after the `cargo llvm-cov` invocation; intentionally
+    # left out here to avoid requiring a third-party token.
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        # `llvm-tools-preview` ships the `llvm-profdata`/`llvm-cov` that
+        # `cargo-llvm-cov` shells out to; without it the coverage build
+        # fails with "llvm-tools not found".
+        components: llvm-tools-preview
+    # Install `cargo-llvm-cov` from a prebuilt binary. Pinning to a SHA
+    # follows the same supply-chain hygiene rule the rest of the
+    # third-party actions in this workflow use; the action verifies the
+    # downloaded binary's checksum before running it.
+    - uses: taiki-e/install-action@7b2024822c8156dba07c12be25e2796c8d7c2b27 # v2.50.13
+      with:
+        tool: cargo-llvm-cov
+    # `--features embed-module-info` mirrors the configuration the crate
+    # ships with on Linux; running coverage without it would skip
+    # everything behind `#[cfg(feature = "embed-module-info")]`. The
+    # LCOV report is the lowest-common-denominator format that Codecov,
+    # Coveralls, GitLab, etc. all consume.
+    - name: Generate LCOV coverage
+      run: cargo llvm-cov --features embed-module-info --lcov --output-path lcov.info --locked
+    # The `--summary-only` text view is what reviewers usually want to
+    # eyeball without downloading the artifact. Pipe it into the
+    # workflow summary so it shows up directly on the run page.
+    # `cargo llvm-cov report` reads the profile data the previous step
+    # produced, so the `--features` flag isn't needed (and isn't
+    # accepted) on this subcommand.
+    - name: Append summary
+      run: |
+        {
+          echo '## Code coverage'
+          echo ''
+          echo '```'
+          cargo llvm-cov report --summary-only
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: coverage-lcov
+        path: lcov.info
+        # 30 days is enough to compare across recent PRs without piling
+        # up storage; CI history older than that is rarely useful.
+        retention-days: 30
 
   taplo:
     name: TOML format (taplo)

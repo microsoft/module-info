@@ -38,6 +38,18 @@ pub(crate) fn bytes_to_linker_directives(bytes: &[u8]) -> String {
 /// "returned value is >= len" post-condition). Saturating to `u32::MAX` lets
 /// downstream size checks (e.g. `MAX_JSON_SIZE`) notice a too-large input
 /// instead of silently corrupting the `.note.package` layout.
+///
+/// # Assumption: `align` fits in `u32`
+/// The crate only ever passes `NOTE_ALIGN = 4` here, so the
+/// `u32::try_from(align).unwrap_or(u32::MAX)` clamp is benign in practice.
+/// **If a future change introduces a caller with `align > u32::MAX`** (only
+/// possible on 64-bit hosts since `usize > u32::MAX` requires it),
+/// `align_u32` saturates to `u32::MAX` and `mask` becomes `0xFFFFFFFE`,
+/// which is *not* the correct mask for the requested alignment. The
+/// post-condition (`returned >= len`) still holds, but the result won't be
+/// aligned to the requested boundary. Either widen this function to
+/// `u64` / `usize`, or `assert!(align <= u32::MAX as usize)` at the call
+/// site.
 pub(crate) fn align_len(len: u32, align: usize) -> u32 {
     debug_assert!(align.is_power_of_two(), "align must be a power of two");
     let align_u32 = u32::try_from(align).unwrap_or(u32::MAX);
