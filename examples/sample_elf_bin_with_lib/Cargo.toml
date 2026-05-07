@@ -19,8 +19,8 @@ name = "sample_elf_bin_with_lib"
 path = "src/main.rs"
 
 [dependencies]
-module-info = { path = "../..", features = ["embed-module-info"] }
 libloading = "0.8"
+module-info = { path = "../..", features = ["embed-module-info"] }
 
 [build-dependencies]
 module-info = { path = "../.." }
