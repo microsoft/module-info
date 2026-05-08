@@ -190,7 +190,7 @@ pub fn read_note_package(path: &Path) -> Result<NotePackage, String> {
                 format!(
                     "{} .note.package payload [{off}..{}] is out of range",
                     path.display(),
-                    off + size
+                    off.saturating_add(size)
                 )
             })?;
             let parsed = parse_note_payload(payload).map_err(|e| {

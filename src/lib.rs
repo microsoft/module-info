@@ -42,7 +42,7 @@
 //! workspace libraries.
 //!
 //! **`staticlib` consumed by an outer (non-cargo) build can embed its own
-//! metadata.** Set [`EmbedOptions::emit_cargo_link_arg`] to `false`; the
+//! metadata.** Set `EmbedOptions::emit_cargo_link_arg` to `false`; the
 //! crate then writes `linker_script.ld` to `out_dir` without emitting the
 //! `cargo:rustc-link-arg` directive. The outer build (Make, CMake, MSBuild,
 //! …) passes that script to its own linker, at which point the
@@ -159,14 +159,14 @@ cfg_if! {
             };
         }
     } else if #[cfg(all(feature = "embed-module-info", not(target_os = "linux")))] {
-        /// No-op stub of [`embed!`](embed) for non-Linux targets. Present so
+        /// No-op stub of `embed!` for non-Linux targets. Present so
         /// cross-platform builds compile without `#[cfg]` guards at each call site.
         #[macro_export]
         macro_rules! embed {
             () => {};
         }
     } else {
-        /// No-op stub of [`embed!`](embed) for feature-off builds (the
+        /// No-op stub of `embed!` for feature-off builds (the
         /// `embed-module-info` feature is disabled). Present so a consumer that
         /// uses `module_info` only for `get_version()` / `get_module_version()`
         /// can still call `module_info::embed!()` in their crate root without a
@@ -935,12 +935,18 @@ pub unsafe fn extract_module_info(ptr: *const u8) -> ModuleInfoResult<String> {
     for i in 0..MAX_NOTE_VALUE_LEN {
         let byte = unsafe { *ptr.add(i) };
         if byte == 0 {
-            // NUL before the closing quote means the value was truncated
-            // or the section is malformed (sanitization strips embedded
-            // NULs from every embedded value at build time).
-            return Err(ModuleInfoError::MalformedJson(
-                "Unexpected NUL before closing quote of JSON value".to_string(),
-            ));
+            // NUL inside the value means the section is truncated or
+            // malformed (sanitization strips embedded NULs from every
+            // embedded value at build time). Distinguish "no opening
+            // quote yet" from "opening found, missing closing" so a
+            // stripped/zeroed memory region is easier to triage than a
+            // payload that just lost its trailing `"`.
+            let message = if open_quote.is_none() {
+                "Unexpected NUL before opening quote of JSON value"
+            } else {
+                "Unexpected NUL before closing quote of JSON value"
+            };
+            return Err(ModuleInfoError::MalformedJson(message.to_string()));
         }
         if byte == b'"' {
             match open_quote {
@@ -959,12 +965,18 @@ pub unsafe fn extract_module_info(ptr: *const u8) -> ModuleInfoResult<String> {
         }
     }
 
-    // Cap hit without finding both quotes; the section is absent,
-    // stripped, or corrupted. Surface the diagnostic instead of a
-    // misleading "missing closing quote" error so build-vs-runtime
-    // problems are easy to triage in core dumps.
+    // Cap hit without finding both quotes. Branch on `open_quote` so the
+    // diagnostic distinguishes "no opening quote ever seen" (section
+    // absent, stripped, or zeroed) from "opening found but trailing `"`
+    // missing" (truncation mid-value). Both still imply a build-vs-runtime
+    // mismatch worth surfacing in core dumps, but the cause is different.
+    let detail = if open_quote.is_none() {
+        "no opening quote found"
+    } else {
+        "opening quote found but no closing quote"
+    };
     Err(ModuleInfoError::MalformedJson(format!(
-        "No closing quote found within {MAX_NOTE_VALUE_LEN} bytes; \
+        "{detail} within {MAX_NOTE_VALUE_LEN} bytes; \
          .note.package section is missing, stripped, or corrupted"
     )))
 }

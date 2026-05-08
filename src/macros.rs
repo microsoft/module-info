@@ -25,7 +25,7 @@ macro_rules! note {
     }
 }
 
-/// Non-Linux stub of [`note!`](note) so cross-platform `build.rs` compiles
+/// Non-Linux stub of `note!` so cross-platform `build.rs` compiles
 /// without `#[cfg]` guards.
 #[cfg(not(target_os = "linux"))]
 #[macro_export]

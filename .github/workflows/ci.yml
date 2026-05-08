@@ -95,7 +95,9 @@ jobs:
     - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       with:
         toolchain: ${{ matrix.rust }}
-        components: clippy, rustfmt
+        # Only the stable cell runs the rustfmt/clippy gates below; skip
+        # downloading the components on the MSRV cell to cut per-job setup time.
+        components: ${{ matrix.rust == 'stable' && 'clippy, rustfmt' || '' }}
     # Examples deliberately do NOT pass `--locked`. Each example crate is a
     # standalone Cargo package and `.gitignore` excludes `examples/**/Cargo.lock`,
     # so there is no committed lockfile for `--locked` to honor; adding it
@@ -169,7 +171,7 @@ jobs:
         artifacts=()
         for path in target/debug/*; do
           [ -f "$path" ] || continue
-          magic=$(head -c 4 "$path" | od -An -tx1 | tr -d ' \n' || true)
+          magic=$(head -c 4 "$path" | od -An -tx1 | tr -d ' \n')
           if [ "$magic" = "7f454c46" ]; then
             artifacts+=("$path")
           fi
@@ -180,9 +182,19 @@ jobs:
         fi
         rc=0
         for bin in "${artifacts[@]}"; do
-          # `awk '/\.note\.package/ {print $4}'` returns the section type
-          # column ("NOTE" or "PROGBITS"); fail loudly on anything but NOTE.
-          types=$(readelf -SW "$bin" | awk '/\.note\.package/ {print $4}')
+          # `readelf -SW` rows look like
+          #   `[Nr] Name Type Address Off Size ES Flg Lk Inf Al`
+          # but the bracketed index splits across two awk fields when it
+          # has a leading space (`[ 9]`) and stays as one when it doesn't
+          # (`[10]`), so column-positional matching is fragile. Instead,
+          # find the field that equals `.note.package` exactly (which avoids
+          # substring hits on `.note.package.*` siblings) and print the next
+          # field, which is always the section Type ("NOTE" or "PROGBITS").
+          types=$(readelf -SW "$bin" | awk '{
+              for (i = 1; i <= NF; i++) {
+                  if ($i == ".note.package") { print $(i+1); break }
+              }
+          }')
           if [ -z "$types" ]; then
             echo "::error::$bin is missing a .note.package section"
             rc=1
