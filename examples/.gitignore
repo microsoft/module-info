@@ -1,0 +1,4 @@
+# Each example is a standalone Cargo package; cargo drops its own target/ and
+# Cargo.lock under each when built via `--manifest-path`. Keep them out of git.
+*/target/
+*/Cargo.lock

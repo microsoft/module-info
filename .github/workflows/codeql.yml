@@ -1,0 +1,49 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly Tuesday 17:29 UTC; the cadence GitHub seeds in templates.
+    - cron: '29 17 * * 2'
+
+# Cancel superseded runs on the same branch / PR so a fast-pushing PR
+# doesn't pile up CodeQL minutes. The weekly schedule still runs unmolested.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+        with:
+          # Clear the workflow token from `.git/config` after fetch so
+          # subsequent CodeQL extractor runs can't leak it.
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
+        with:
+          languages: rust
+          # `none` skips compilation; CodeQL's Rust extractor analyzes
+          # sources directly. Faster and works for libraries that don't
+          # need a full build to surface issues.
+          build-mode: none
+          # `security-extended` adds higher-confidence-but-noisier rules;
+          # `security-and-quality` adds maintainability/style checks.
+          queries: security-extended,security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4
+        with:
+          category: "/language:rust"

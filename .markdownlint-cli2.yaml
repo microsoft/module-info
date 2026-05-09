@@ -1,0 +1,16 @@
+$schema: https://raw.githubusercontent.com/DavidAnson/markdownlint-cli2/v0.21.0/schema/markdownlint-cli2-config-schema.json
+gitignore: true
+config:
+  code-block-style:
+    style: consistent
+  commands-show-output: false
+  first-line-heading: false
+  line-length: false
+  no-bare-urls: false
+  no-duplicate-heading: false
+  no-inline-html: false
+  ol-prefix:
+    style: ordered
+  table-column-style: false
+  ul-style:
+    style: dash

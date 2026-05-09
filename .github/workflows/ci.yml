@@ -1,0 +1,405 @@
+# cSpell:ignore taplo dtolnay RUSTFLAGS Dwarnings
+name: Rust CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Default to least-privilege; CI jobs only need to read the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same branch / PR. Saves runner minutes when
+# a contributor pushes several commits in quick succession.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Rust ${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Promote dep-side warnings to errors only in the test job. Doing this
+      # at the workflow level would also affect build scripts of dependencies,
+      # so a future dep release emitting a deprecation warning would break CI
+      # through no fault of ours.
+      RUSTFLAGS: "-Dwarnings"
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin to the exact MSRV (1.74.0). `"1.74"` would resolve to the
+        # latest 1.74.x patch and let a regression in a patch release ride
+        # in undetected.
+        rust: [stable, "1.74.0"]
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    # All actions (first-party `actions/*` and third-party) are SHA-pinned per
+    # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions.
+    # `dtolnay/rust-toolchain` ships no versioned tags, so the trailing `# stable`
+    # comment tracks intent. Dependabot keeps the SHAs fresh on its weekly run.
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: ${{ matrix.rust }}
+
+    - name: Build
+      run: cargo build --verbose --locked
+
+    - name: Run tests
+      run: cargo test --verbose --locked
+
+    - name: Build with embed-module-info
+      run: cargo build --verbose --features embed-module-info --locked
+
+    - name: Run tests with embed-module-info
+      run: cargo test --verbose --features embed-module-info --locked
+
+  examples:
+    name: Build & test example (${{ matrix.example }}, Rust ${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - sample_elf_bin
+          - sample_elf_bin_with_lib
+          - sample_lib
+          - sample_builder_api
+          - sample_info_api
+          - sample_crashing_process
+        # Build/test each example on both stable and the MSRV. fmt + clippy
+        # only run on stable (lint output drifts between toolchains; we
+        # don't want to gate on whichever lint set 1.74 happened to ship).
+        # The MSRV cell catches MSRV regressions in example sources or
+        # their dep graphs that the main-crate `test` matrix wouldn't see.
+        rust: [stable, "1.74.0"]
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: ${{ matrix.rust }}
+        # Only the stable cell runs the rustfmt/clippy gates below; skip
+        # downloading the components on the MSRV cell to cut per-job setup time.
+        components: ${{ matrix.rust == 'stable' && 'clippy, rustfmt' || '' }}
+    # Examples deliberately do NOT pass `--locked`. Each example crate is a
+    # standalone Cargo package and `.gitignore` excludes `examples/**/Cargo.lock`,
+    # so there is no committed lockfile for `--locked` to honor; adding it
+    # would fail every example job with "cannot create the lock file because
+    # --locked was passed". Examples regenerate their lock fresh per build.
+    #
+    # rustfmt + clippy gate per example, stable only. The repo-root clippy
+    # job above only sees the main crate's sources because each example
+    # has its own `[workspace]` table that detaches it from the outer
+    # workspace. Without this step, clippy errors and rustfmt drift in
+    # example sources land untouched and only surface when someone runs
+    # the per-example tooling by hand. Run before `cargo build` so a
+    # malformed example fails fast.
+    - name: Rustfmt example
+      if: matrix.rust == 'stable'
+      working-directory: examples/${{ matrix.example }}
+      run: cargo fmt --check
+    - name: Clippy example
+      if: matrix.rust == 'stable'
+      working-directory: examples/${{ matrix.example }}
+      run: cargo clippy --all-targets -- -D warnings
+    - name: Build example
+      working-directory: examples/${{ matrix.example }}
+      run: cargo build --verbose
+    # Run the example's own tests too. Historically this job ran only
+    # `cargo build`, which let the three binary-example test gates on
+    # `#[cfg(feature = "embed-module-info")]` silently skip every test
+    # they were meant to cover (those feature gates live on the
+    # *dependency*, not on the binary crate, so they evaluated false).
+    # The cfg gates are gone now, but running `cargo test` here is what
+    # actually catches that class of bug in the future.
+    - name: Test example
+      working-directory: examples/${{ matrix.example }}
+      run: cargo test --verbose
+
+    # Hard guard against the SHT_NOTE → SHT_PROGBITS regression. The crate's
+    # whole crash-triage value depends on `.note.package` ending up as a
+    # NOTE-typed section so `readelf -n` and `systemd-coredump` recognize
+    # it; if the rlib's `PACKAGE_NOTE_SECTION` static is dropped from the
+    # final link, GNU ld synthesizes the section from `BYTE(...)` directives
+    # alone and types it PROGBITS instead. The bytes are still there so
+    # consumers who scan strings won't notice; the CI gate is the only
+    # thing standing between that silent regression and a release.
+    #
+    # Walk every ELF artifact under `target/debug/` (binaries and `.so`s)
+    # for this example and assert each `.note.package` section is NOTE.
+    # `readelf -SW` keeps the output one-line-per-section; the awk filter
+    # picks only `.note.package` rows and reports the type column.
+    #
+    # Stable-only: section type is determined by the linker script and
+    # the binutils version on the runner, not by rustc. Running this
+    # check twice (once per matrix toolchain) is pure duplication; the
+    # MSRV cell still verifies the same artifact via the parser-based
+    # `tests/note_section.rs` integration tests next door, which DO
+    # depend on the toolchain being able to compile the test code.
+    - name: Verify .note.package is SHT_NOTE
+      if: matrix.rust == 'stable'
+      working-directory: examples/${{ matrix.example }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        # Walk top-level entries under target/debug only. The `target/debug/*`
+        # glob covers both binaries and `libname.so`; deps/ (per-rlib `.rlib`s,
+        # transitive `.so`s pulled in for the test runner) is intentionally
+        # skipped because those aren't artifacts we ship.
+        #
+        # ELF candidates filtered by magic bytes: first 4 bytes of an ELF are
+        # 0x7f 'E' 'L' 'F'. `head -c` reads raw bytes; the od pipeline turns
+        # them into hex for a literal compare.
+        artifacts=()
+        for path in target/debug/*; do
+          [ -f "$path" ] || continue
+          magic=$(head -c 4 "$path" | od -An -tx1 | tr -d ' \n')
+          if [ "$magic" = "7f454c46" ]; then
+            artifacts+=("$path")
+          fi
+        done
+        if [ ${#artifacts[@]} -eq 0 ]; then
+          echo "::error::no ELF artifacts found under target/debug for ${{ matrix.example }}"
+          exit 1
+        fi
+        rc=0
+        for bin in "${artifacts[@]}"; do
+          # `readelf -SW` rows look like
+          #   `[Nr] Name Type Address Off Size ES Flg Lk Inf Al`
+          # but the bracketed index splits across two awk fields when it
+          # has a leading space (`[ 9]`) and stays as one when it doesn't
+          # (`[10]`), so column-positional matching is fragile. Instead,
+          # find the field that equals `.note.package` exactly (which avoids
+          # substring hits on `.note.package.*` siblings) and print the next
+          # field, which is always the section Type ("NOTE" or "PROGBITS").
+          types=$(readelf -SW "$bin" | awk '{
+              for (i = 1; i <= NF; i++) {
+                  if ($i == ".note.package") { print $(i+1); break }
+              }
+          }')
+          if [ -z "$types" ]; then
+            echo "::error::$bin is missing a .note.package section"
+            rc=1
+            continue
+          fi
+          while IFS= read -r t; do
+            if [ "$t" != "NOTE" ]; then
+              echo "::error::$bin has .note.package typed as $t (expected NOTE)"
+              rc=1
+            fi
+          done <<<"$types"
+        done
+        exit $rc
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        components: rustfmt
+    - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        components: clippy
+    - name: Clippy (default features)
+      run: cargo clippy --all-targets --locked -- -D warnings
+    - name: Clippy (embed-module-info)
+      run: cargo clippy --all-targets --features embed-module-info --locked -- -D warnings
+    # `--all-features` future-proofs against new features landing without
+    # clippy coverage. Runs last so feature-specific failures are easier
+    # to attribute.
+    - name: Clippy (all features)
+      run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTDOCFLAGS: "-Dwarnings"
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - name: Generate documentation
+      run: cargo doc --no-deps --features embed-module-info --locked
+
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Reporting-only: a coverage drop should be visible in the PR but
+    # shouldn't block a merge. Threshold-based gates create churn from
+    # incidental refactors. Surfaced via the workflow summary + an
+    # uploaded `lcov.info` artifact so reviewers can drill in if needed.
+    # Codecov / Coveralls integration can layer on top by adding an
+    # upload step after the `cargo llvm-cov` invocation; intentionally
+    # left out here to avoid requiring a third-party token.
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        # `llvm-tools-preview` ships the `llvm-profdata`/`llvm-cov` that
+        # `cargo-llvm-cov` shells out to; without it the coverage build
+        # fails with "llvm-tools not found".
+        components: llvm-tools-preview
+    # Install `cargo-llvm-cov` from a prebuilt binary. Pinning to a SHA
+    # follows the same supply-chain hygiene rule the rest of the
+    # third-party actions in this workflow use; the action verifies the
+    # downloaded binary's checksum before running it.
+    - uses: taiki-e/install-action@cca35edeb1d01366c2843b68fc3ca441446d73d3 # v2.77.1
+      with:
+        tool: cargo-llvm-cov
+    # `--features embed-module-info` mirrors the configuration the crate
+    # ships with on Linux; running coverage without it would skip
+    # everything behind `#[cfg(feature = "embed-module-info")]`. The
+    # LCOV report is the lowest-common-denominator format that Codecov,
+    # Coveralls, GitLab, etc. all consume.
+    - name: Generate LCOV coverage
+      run: cargo llvm-cov --features embed-module-info --lcov --output-path lcov.info --locked
+    # The `--summary-only` text view is what reviewers usually want to
+    # eyeball without downloading the artifact. Pipe it into the
+    # workflow summary so it shows up directly on the run page.
+    # `cargo llvm-cov report` reads the profile data the previous step
+    # produced, so the `--features` flag isn't needed (and isn't
+    # accepted) on this subcommand.
+    - name: Append summary
+      run: |
+        {
+          echo '## Code coverage'
+          echo ''
+          echo '```'
+          cargo llvm-cov report --summary-only
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+      with:
+        name: coverage-lcov
+        path: lcov.info
+        # 30 days is enough to compare across recent PRs without piling
+        # up storage; CI history older than that is rarely useful.
+        retention-days: 30
+
+  taplo:
+    name: TOML format (taplo)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    # Pin taplo to a known release. Bump deliberately when updating; do not
+    # float to "latest". The .gz is downloaded first, sha256-verified, then
+    # decompressed; guards against a tampered or partial download (HTTPS
+    # alone doesn't protect against a compromised release asset).
+    - name: Install taplo
+      run: |
+        set -euo pipefail
+        EXPECTED_SHA=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
+        curl -fsSL --retry 3 \
+          https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz \
+          -o /tmp/taplo.gz
+        echo "${EXPECTED_SHA}  /tmp/taplo.gz" | sha256sum --check -
+        gunzip /tmp/taplo.gz
+        chmod +x /tmp/taplo
+    # `RUST_LOG=warn` suppresses taplo's INFO-level startup spam; the check
+    # itself still reports diff hunks at error level on any drift.
+    - run: /tmp/taplo fmt --check
+      env:
+        RUST_LOG: warn
+
+  markdownlint:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
+      with:
+        globs: "**/*.md"
+
+  package-list:
+    name: cargo package (dry-run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    # Inspect the file list that `cargo publish` would upload. Catches
+    # internal files leaking into the published tarball if the `exclude`
+    # block in Cargo.toml drifts. `--allow-dirty` keeps the check robust
+    # against incidental working-tree noise on the runner.
+    - run: cargo package --list --allow-dirty --locked
+
+  advisories:
+    name: Security advisories (cargo-deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+      with:
+        # PR jobs build untrusted code; clear the workflow token from
+        # `.git/config` so a malicious build script can't exfiltrate it.
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - name: Run cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@91bf2b620e09e18d6eb78b92e7861937469acedb # v2.0.17
+      with:
+        # `check all` runs advisories + bans + licenses + sources. For an
+        # OSS crate on crates.io the licenses check is particularly valuable
+        # since an accidentally-pulled GPL transitive dep would silently break
+        # the crate's `license = "MIT"` claim.
+        command: check all

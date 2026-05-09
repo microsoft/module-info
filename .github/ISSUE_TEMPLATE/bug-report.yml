@@ -1,0 +1,123 @@
+name: Bug report
+description: Report a bug in module-info
+labels: ["bug"]
+title: "[BUG] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Before opening an issue,
+        please check that there isn't already an open issue tracking the same problem.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: What went wrong?
+    validations:
+      required: true
+
+  - type: input
+    id: crate-version
+    attributes:
+      label: Crate version
+      description: The version of `module-info` where the bug was found (see `Cargo.toml` or `cargo tree | grep module-info`).
+      placeholder: "x.y.z"
+    validations:
+      required: true
+
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust toolchain version
+      description: Output of `rustc --version`.
+      placeholder: "e.g. rustc 1.74.0 (79e9716c9 2023-11-13)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: |
+        `module-info` actively embeds metadata only on Linux; non-Linux targets
+        compile to no-ops. If you're seeing a bug on macOS/Windows, choose
+        accordingly so we can scope correctly.
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: target-triple
+    attributes:
+      label: Target triple
+      description: Output of `rustc -vV | grep host` (or the explicit `--target` you build with).
+      placeholder: "e.g. x86_64-unknown-linux-gnu"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: features
+    attributes:
+      label: Feature flags
+      description: Which feature configuration reproduces the bug?
+      options:
+        - default (no features)
+        - embed-module-info
+        - both
+        - other (please describe in Additional context)
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A [minimal reproducible example](https://stackoverflow.com/help/minimal-reproducible-example) is strongly preferred.
+      placeholder: |
+        1. Add `module-info = "..."` to Cargo.toml with feature `...`
+        2. Run `cargo build --release`
+        3. Inspect the resulting binary with `readelf -n target/release/...`
+        4. See unexpected output
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: |
+        What actually happened? Include error messages, build output, or
+        ELF tool output (`readelf`, `objdump`) where relevant. Wrap long
+        output in triple-backtick code fences.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else relevant (linker, build script behavior, custom target, container, etc.).
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I have followed the [Code of Conduct](https://github.com/microsoft/module-info/blob/main/CODE_OF_CONDUCT.md).
+          required: true
+        - label: I have searched existing issues and confirmed this is not a duplicate.
+          required: true

@@ -1,0 +1,51 @@
+name: Compliance checks
+
+# Lightweight string scan that catches the most common confidentiality-marker
+# leaks during PR review so contributors get fast feedback. The authoritative
+# scan with the full term set runs in the companion Azure DevOps pipeline
+# before each release; this is just a guardrail on the GitHub side.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same branch / PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  text-scan:
+    name: Repo text scan (pre-flight)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+        with:
+          # PR jobs may run untrusted code in subsequent steps; clear the
+          # workflow token from `.git/config` defensively.
+          persist-credentials: false
+      - name: Scan for disallowed terms
+        # One canonical pattern per concept; `git grep -i` makes matching
+        # case-insensitive so sentence-case variants ("Microsoft confidential")
+        # still get caught. Excludes this workflow file itself, which has the
+        # patterns embedded as data.
+        run: |
+          set -euo pipefail
+          patterns=(
+            'microsoft confidential'
+            'internal use only'
+            'do not distribute'
+          )
+          status=0
+          for p in "${patterns[@]}"; do
+            if git grep -inI -e "$p" -- ':!*.github/workflows/policheck.yml'; then
+              echo "::error::Disallowed term found: $p"
+              status=1
+            fi
+          done
+          exit "$status"

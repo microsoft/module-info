@@ -1,0 +1,31 @@
+[package]
+name = "sample_builder_api"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# The sample_builder_api example demonstrates `embed_package_metadata` with a
+# hand-constructed `PackageMetadata`. The zero-config path
+# (`generate_project_metadata_and_linker_script`) still reads these keys if
+# present, but the build script here overrides them programmatically. The
+# values that actually land in the ELF note come from `build.rs`.
+[package.metadata.module_info]
+maintainer = "placeholder@contoso.com"
+type = "tool"
+copyright = "Contoso, Ltd."
+
+[[bin]]
+name = "sample_builder_api"
+path = "src/main.rs"
+
+[dependencies]
+module-info = { path = "../..", features = ["embed-module-info"] }
+
+[build-dependencies]
+module-info = { path = "../.." }
+
+# Each example under examples/ is a standalone Cargo package. This empty
+# [workspace] table detaches it from the outer workspace so
+# `cargo build --manifest-path <this>` works from anywhere, matching how an
+# external consumer would use the crate.
+[workspace]

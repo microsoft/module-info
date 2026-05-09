@@ -1,0 +1,57 @@
+THIRD-PARTY NOTICES
+
+This project, module-info, incorporates the following third-party open
+source software through Cargo dependencies. The original copyright notices
+and the licenses under which Microsoft received such components are listed
+below. Cargo resolves and fetches these crates from crates.io at build time;
+they are not redistributed in source form by this repository.
+
+For the full license text of any crate listed below, see the `LICENSE` /
+`LICENSE-MIT` / `LICENSE-APACHE` files inside the crate's source tree on
+crates.io or its upstream repository.
+
+------------------------------------------------------------------------
+
+Direct runtime dependencies
+---------------------------
+
+1. cfg-if
+   Repository: https://github.com/rust-lang/cfg-if
+   License:    MIT OR Apache-2.0
+
+2. toml (Linux targets only)
+   Repository: https://github.com/toml-rs/toml
+   License:    MIT OR Apache-2.0
+
+3. serde (Linux targets only)
+   Repository: https://github.com/serde-rs/serde
+   License:    MIT OR Apache-2.0
+
+4. serde_json (Linux targets only)
+   Repository: https://github.com/serde-rs/json
+   License:    MIT OR Apache-2.0
+
+5. indexmap (Linux targets only, transitive lower-bound pin)
+   Repository: https://github.com/indexmap-rs/indexmap
+   License:    Apache-2.0 OR MIT
+
+Direct development-only dependencies
+------------------------------------
+
+6. tempfile (Linux targets only, dev-dependency; not shipped to consumers)
+   Repository: https://github.com/Stebalien/tempfile
+   License:    MIT OR Apache-2.0
+
+------------------------------------------------------------------------
+
+Transitive dependencies pulled in by the crates above (such as `serde_core`,
+`serde_derive`, `proc-macro2`, `quote`, `syn`, `itoa`, `memchr`, `hashbrown`,
+`equivalent`, `winnow`, `toml_edit`, `toml_datetime`, `serde_spanned`,
+`toml_write`, and platform shims like `libc`, `linux-raw-sys`, `rustix`,
+`fastrand`, `getrandom`, `bitflags`, `errno`, `once_cell`, `windows-*`,
+`wasip2`, `wit-bindgen`, `r-efi`, `unicode-ident`) are each licensed under
+permissive terms compatible with the MIT license (typically MIT OR
+Apache-2.0; a small number are dual-licensed with the Unicode-3.0 license,
+the Unlicense, or the LLVM exception). Run `cargo tree --format "{p} {l}"`
+to inspect the resolved license of every crate in the build graph for the
+exact version you are consuming.

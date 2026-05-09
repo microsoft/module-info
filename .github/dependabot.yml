@@ -1,0 +1,33 @@
+# Weekly Dependabot update PRs. CI's MSRV-1.74 matrix gates every bump,
+# so a dep that raises the rust floor will fail the PR before it merges.
+version: 2
+updates:
+  # Root crate plus each standalone example. Dependabot's `directory:` only
+  # watches the manifest at that path; examples have their own Cargo.toml,
+  # so they need their own entries or they'd silently go stale.
+  - package-ecosystem: cargo
+    directories:
+      - "/"
+      - "/examples/sample_elf_bin"
+      - "/examples/sample_elf_bin_with_lib"
+      - "/examples/sample_lib"
+      - "/examples/sample_builder_api"
+      - "/examples/sample_info_api"
+      - "/examples/sample_crashing_process"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patches and minors are usually safe; bundle them so we don't drown
+      # in a wave of single-dep PRs each week. Majors stay split out so they
+      # get individual review.
+      patches:
+        update-types: ["patch"]
+      minor:
+        update-types: ["minor"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

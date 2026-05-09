@@ -1,0 +1,138 @@
+# cSpell:ignore dtolnay softprops pipefail
+name: Release
+
+on:
+  push:
+    tags:
+      # Match SemVer-shaped tags only. Filters obviously-malformed tags out
+      # before they spawn a runner; the version-vs-Cargo.toml check inside
+      # `verify` still catches anything that passes this glob but doesn't
+      # match the manifest version.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+# Default to least-privilege; override per-job below when writes are required.
+permissions:
+  contents: read
+
+jobs:
+  # Stage 1: validate everything before any irreversible action runs. If this
+  # fails, no GitHub Release is created and no crates.io publish is attempted.
+  verify:
+    name: Verify tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Full history so `git merge-base --is-ancestor` below can walk main.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # `actions/checkout` with `fetch-depth: 0` on a tag fetches the tag's
+      # history but does NOT populate `refs/remotes/origin/main`. Pull main
+      # explicitly so the ancestry check has something to walk.
+      - name: Fetch main
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      # Verify the tag points at a commit that is reachable from `main`. This
+      # guards against a contributor with tag-push rights (or a compromised
+      # PAT) triggering a release from an arbitrary commit that never went
+      # through PR review on `main`.
+      - name: Verify tag is on main
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME points at commit $GITHUB_SHA which is not an ancestor of origin/main. Refusing to release." >&2
+            exit 1
+          fi
+
+      # All actions (first-party `actions/*` and third-party) are SHA-pinned
+      # because this workflow has access to CRATES_IO_TOKEN downstream.
+      # `dtolnay/rust-toolchain` ships no versioned tags; the trailing
+      # `# stable` comment tracks intent.
+      # See: https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Verify Cargo.toml matches tag
+        # `cargo metadata | jq` is sturdier than grep+sed on Cargo.toml,
+        # which would also match `rust-version` or dependency `version` lines.
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps \
+            | jq -r '.packages[] | select(.name=="module-info") | .version')
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $CARGO_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Build
+        run: cargo build --release --verbose --locked
+
+      - name: Run tests
+        run: cargo test --release --verbose --locked
+
+      - name: Run tests with embed-module-info
+        run: cargo test --release --verbose --features embed-module-info --locked
+
+      # Dry-run publish here so a malformed manifest, missing README, or
+      # feature-flag mistake fails verify before the irreversible real
+      # publish runs in the next job. crates.io versions are immutable
+      # (`yank` exists but `delete` does not), so burning one on a
+      # misconfigured publish is expensive.
+      - name: Publish dry-run
+        run: cargo publish --dry-run --verbose --locked
+
+  # Stage 2: actually publish to crates.io. The `crates-io` environment
+  # gates `CRATES_IO_TOKEN` behind a manual approval gate configured in
+  # the repository's environment settings (Settings → Environments →
+  # crates-io → Required reviewers). Tag-push alone cannot auto-publish.
+  publish:
+    name: Publish to crates.io
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --verbose --locked
+
+  # Stage 3: create the GitHub Release. Runs last so a failed crates.io
+  # publish never leaves an orphan Release pointing at a version that
+  # isn't actually on the registry.
+  release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # softprops/action-gh-release needs to create the GitHub Release.
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
+        with:
+          persist-credentials: false
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          # Auto-populates the body with the merged-PR list since the
+          # previous release tag; saves writing release notes by hand.
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

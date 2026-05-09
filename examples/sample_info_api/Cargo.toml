@@ -1,0 +1,31 @@
+[package]
+name = "sample_info_api"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+# The sample_info_api example demonstrates the `module_info::new(Info { ... })`
+# one-call entry point: the struct-literal convenience API whose field names
+# match the embedded JSON shape (`r#type`, `moduleVersion`, `osVersion`) rather
+# than the internal snake_case. Metadata is driven entirely from build.rs; the
+# keys below are placeholders that the build script overrides.
+[package.metadata.module_info]
+maintainer = "placeholder@contoso.com"
+type = "tool"
+copyright = "Contoso, Ltd."
+
+[[bin]]
+name = "sample_info_api"
+path = "src/main.rs"
+
+[dependencies]
+module-info = { path = "../..", features = ["embed-module-info"] }
+
+[build-dependencies]
+module-info = { path = "../.." }
+
+# Each example under examples/ is a standalone Cargo package. This empty
+# [workspace] table detaches it from the outer workspace so
+# `cargo build --manifest-path <this>` works from anywhere, matching how an
+# external consumer would use the crate.
+[workspace]
