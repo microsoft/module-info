@@ -1410,9 +1410,10 @@ mod tests {
             "Repository name should not be empty"
         ); // repo name
 
-        // If we're in a git repo, it should return a non-"Unknown" value
-        // but we accept "Unknown" as valid too (e.g., when testing in a tarball)
-        assert!(git_info.2 == "Unknown" || !git_info.2.is_empty());
+        // In a git repo this returns the parsed remote name; outside one
+        // (e.g. testing from a published tarball) it falls back to the
+        // "unknown" sentinel. Either is valid here.
+        assert!(git_info.2 == "unknown" || !git_info.2.is_empty());
 
         println!(
             "Git Info - Branch: {}, Hash: {}, Repo: {}",

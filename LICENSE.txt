@@ -1,3 +1,5 @@
+module-info
+
 Copyright (c) Microsoft Corporation.
 
 MIT License

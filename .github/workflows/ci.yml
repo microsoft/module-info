@@ -40,15 +40,15 @@ jobs:
         rust: [stable, "1.74.0"]
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    # Third-party actions are SHA-pinned per
+    # All actions (first-party `actions/*` and third-party) are SHA-pinned per
     # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions.
     # `dtolnay/rust-toolchain` ships no versioned tags, so the trailing `# stable`
-    # comment tracks intent. Dependabot keeps the SHA fresh on its weekly run.
+    # comment tracks intent. Dependabot keeps the SHAs fresh on its weekly run.
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       with:
@@ -87,7 +87,7 @@ jobs:
         # their dep graphs that the main-crate `test` matrix wouldn't see.
         rust: [stable, "1.74.0"]
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -214,7 +214,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -229,7 +229,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -254,7 +254,7 @@ jobs:
     env:
       RUSTDOCFLAGS: "-Dwarnings"
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -275,7 +275,7 @@ jobs:
     # upload step after the `cargo llvm-cov` invocation; intentionally
     # left out here to avoid requiring a third-party token.
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -315,7 +315,7 @@ jobs:
           cargo llvm-cov report --summary-only
           echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
-    - uses: actions/upload-artifact@v7
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
       with:
         name: coverage-lcov
         path: lcov.info
@@ -328,7 +328,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -358,7 +358,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -372,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -389,7 +389,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.

@@ -897,7 +897,7 @@ are no-ops outside a build-script context.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for the full license text.
+This project is licensed under the MIT License. See [LICENSE.txt](LICENSE.txt) for the full license text.
 
 ## Contributing
 

@@ -77,9 +77,13 @@ pub(crate) fn align_len(len: u32, align: usize) -> u32 {
 /// detection produces no usable result.
 ///
 /// # Errors
-/// Returns `ModuleInfoError::IoError` if `/etc/os-release` exists but I/O
-/// fails while reading it, or `ModuleInfoError::Other` if the file exceeds
-/// the 10 KiB safety cap. A missing file is *not* an error; see above.
+/// Returns `ModuleInfoError::IoError` if `/etc/os-release` opened successfully
+/// but reading it failed mid-stream, or `ModuleInfoError::Other` if the file
+/// exceeds the 10 KiB safety cap. `File::open` failures are *not* surfaced as
+/// errors (a missing or unreadable file, e.g. `NotFound` or `PermissionDenied`,
+/// silently falls back to `("Linux", "Unknown")`); the helper is best-effort
+/// because a degraded value still survives into a crash dump and is more
+/// useful than no value.
 #[must_use = "distro info is the sole output of this function; discarding it yields no useful side effects"]
 pub fn get_distro_info() -> ModuleInfoResult<(String, String)> {
     const MAX_FILE_SIZE: usize = 10 * 1024;
@@ -200,7 +204,7 @@ pub fn get_git_info() -> ModuleInfoResult<(String, String, String)> {
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
         })
-        .unwrap_or_else(|| "Unknown".to_string());
+        .unwrap_or_else(|| "unknown".to_string());
 
     Ok((branch, hash, repo_name))
 }
