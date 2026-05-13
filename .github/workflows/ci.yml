@@ -290,7 +290,7 @@ jobs:
     # follows the same supply-chain hygiene rule the rest of the
     # third-party actions in this workflow use; the action verifies the
     # downloaded binary's checksum before running it.
-    - uses: taiki-e/install-action@3fa6878dc4ae603f73960271565a082bf196ab96 # v2.77.2
+    - uses: taiki-e/install-action@3235f8901fd37ffed0052b276cec25a362fb82e9 # v2.77.7
       with:
         tool: cargo-llvm-cov
     # `--features embed-module-info` mirrors the configuration the crate
