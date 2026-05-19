@@ -47,3 +47,20 @@ jobs:
         uses: github/codeql-action/analyze@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4
         with:
           category: "/language:rust"
+
+  # Stable name for branch protection so adding languages or splitting the
+  # analyze job later doesn't require editing the protection rule.
+  codeql-required:
+    name: CodeQL required
+    if: always()
+    needs:
+      - analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Verify every dependency succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null
