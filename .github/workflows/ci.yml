@@ -319,9 +319,10 @@ jobs:
       with:
         name: coverage-lcov
         path: lcov.info
-        # 30 days is enough to compare across recent PRs without piling
-        # up storage; CI history older than that is rarely useful.
-        retention-days: 30
+        # 365-day retention is required for audit evidence (build-test
+        # results retained 12 months). Keep this in sync with the repo's
+        # Actions retention setting; the lower of the two wins.
+        retention-days: 365
 
   taplo:
     name: TOML format (taplo)
