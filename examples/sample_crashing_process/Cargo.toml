@@ -19,14 +19,14 @@ name = "sample_crashing_process"
 path = "src/main.rs"
 
 [dependencies]
-module-info = { path = "../..", features = ["embed-module-info"] }
+module-info = { version = "0.5.0", features = ["embed-module-info"] }
 # Pin the nix minor (`^0.31`) instead of using a wildcard `0`. nix bumps
 # its MSRV freely across 0.x releases; locking to a known-MSRV-safe minor
 # keeps this example buildable on the workspace's pinned 1.74.0.
 nix = { version = "0.31", features = ["signal"] }
 
 [build-dependencies]
-module-info = { path = "../.." }
+module-info = "0.5.0"
 
 # Standalone Cargo package; detach from the outer workspace so it builds via
 # `cargo build --manifest-path <this>` like an external consumer would.
