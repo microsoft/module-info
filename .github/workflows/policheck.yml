@@ -49,3 +49,20 @@ jobs:
             fi
           done
           exit "$status"
+
+  # Stable name for branch protection so adding more compliance scans later
+  # doesn't require editing the protection rule.
+  compliance-required:
+    name: Compliance required
+    if: always()
+    needs:
+      - text-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Verify every dependency succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null

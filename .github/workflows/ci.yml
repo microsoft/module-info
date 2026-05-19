@@ -403,3 +403,34 @@ jobs:
         # since an accidentally-pulled GPL transitive dep would silently break
         # the crate's `license = "MIT"` claim.
         command: check all
+
+  # Single aggregator for branch protection. Required-checks lists in branch
+  # protection match by literal job name, so listing every matrix cell here
+  # would break every time the matrix changes. This job aggregates all CI
+  # results into one stable name; require only "CI required" in protection.
+  ci-required:
+    name: CI required
+    if: always()
+    needs:
+      - test
+      - examples
+      - fmt
+      - clippy
+      - docs
+      - coverage
+      - taplo
+      - markdownlint
+      - package-list
+      - advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      # `if: always()` above runs this even when a dep fails or is skipped,
+      # otherwise the gate stays pending forever. A skipped dep counts as
+      # a failure here on purpose: a silently-skipped test must not pass.
+      - name: Verify every dependency succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success")' >/dev/null
