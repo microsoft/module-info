@@ -95,6 +95,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: crates-io
+    permissions:
+      contents: read
+      # `id-token: write` lets the runner mint an OIDC token that the
+      # attestation API signs against. `attestations: write` lets the
+      # attestation step persist the resulting SLSA provenance to the
+      # repo's attestation store so consumers can verify with
+      # `gh attestation verify <file> --repo microsoft/module-info`.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.0
         with:
@@ -103,10 +112,27 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
+      # Materialize the .crate tarball before attestation so the file path
+      # passed to the attest step is the exact byte-for-byte artifact
+      # `cargo publish --no-verify` will upload below. `cargo publish`
+      # without --no-verify re-packages internally, which would attest one
+      # tarball and ship a freshly-rebuilt different one.
+      - name: Package crate
+        run: cargo package --locked
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: 'target/package/*.crate'
+
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: cargo publish --verbose --locked
+        # --no-verify skips the re-package + re-build that `cargo publish`
+        # does by default. Safe here because the `verify` job already
+        # built/tested with the same Cargo.lock, and `cargo package` above
+        # just produced the tarball we attested.
+        run: cargo publish --verbose --locked --no-verify
 
   # Stage 3: create the GitHub Release. Runs last so a failed crates.io
   # publish never leaves an orphan Release pointing at a version that
