@@ -1,1 +1,8 @@
-* @microsoft/module-info-maintainers
+# CODEOWNERS uses last-match-wins, not most-specific-wins. The supply-chain
+# sensitive paths are pinned to the same team today; if `*` is ever broadened
+# to a wider audience, workflow/Dependabot/CI changes stay locked to the
+# maintainer team without a separate CODEOWNERS edit.
+*                       @microsoft/module-info-maintainers
+.github/workflows/      @microsoft/module-info-maintainers
+.github/dependabot.yml  @microsoft/module-info-maintainers
+.github/CODEOWNERS      @microsoft/module-info-maintainers
