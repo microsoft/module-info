@@ -414,7 +414,18 @@ pub fn new(info: Info) -> ModuleInfoResult<EmbedArtifacts> {
 /// time.
 #[cfg(target_os = "linux")]
 fn validate_module_version(module_version: &str) -> ModuleInfoResult<()> {
-    let parts: Vec<&str> = module_version.split('.').collect();
+    // When `allow_prerelease_suffix = true` in `[package.metadata.module_info]`,
+    // `format_version_parts` re-attaches the SemVer-style tail to the numeric
+    // core (e.g. `"7.5.3.0-PullRequest-12345"`). Validate only the numeric core
+    // so the u16/4-part guarantee still holds; the suffix is informational and
+    // ships verbatim. Inputs without a `-` or `+` behave identically to before.
+    let core = match (module_version.find('-'), module_version.find('+')) {
+        (Some(a), Some(b)) => module_version.get(..a.min(b)).unwrap_or(module_version),
+        (Some(a), None) => module_version.get(..a).unwrap_or(module_version),
+        (None, Some(b)) => module_version.get(..b).unwrap_or(module_version),
+        (None, None) => module_version,
+    };
+    let parts: Vec<&str> = core.split('.').collect();
     if parts.len() != 4 {
         return Err(ModuleInfoError::MalformedJson(format!(
             "moduleVersion must have exactly 4 dot-separated parts, got {} in {module_version:?}",
@@ -1930,6 +1941,25 @@ mod tests {
         for v in ["-1.0.0.0", "a.b.c.d", "1.2.x.4", "1.2.3.4a", "v1.2.3.4"] {
             validate_module_version(v).expect_err("non-numeric parts must be rejected");
         }
+    }
+
+    /// When `allow_prerelease_suffix = true` reaches the validator (the
+    /// `format_version_parts` path re-attaches a SemVer-style tail to the
+    /// formatted numeric core), the validator must read past the suffix and
+    /// only enforce the u16/4-part rule on the numeric core. Inputs without
+    /// a `-` or `+` are unaffected.
+    #[test]
+    fn validate_module_version_accepts_valid_core_with_suffix() -> TestResult {
+        for v in [
+            "1.2.3.4-PullRequest-12345",
+            "7.5.3.0-beta.3",
+            "5.2.100.7+ci.42",
+            "0.0.0.0-alpha",
+            "65535.65535.65535.65535-build-99",
+        ] {
+            validate_module_version(v)?;
+        }
+        Ok(())
     }
 
     /// Empty component between dots is rejected explicitly (not just
