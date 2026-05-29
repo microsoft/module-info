@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-29
+
 ### Added
 
 - `allow_prerelease_suffix` key in `[package.metadata.module_info]`. When set
@@ -78,5 +80,6 @@ everywhere without `#[cfg]` guards at each call site.
 - `ModuleInfoError` / `ModuleInfoResult` with `#[non_exhaustive]` so new
   variants can land without a semver-major bump.
 
-[Unreleased]: https://github.com/microsoft/module-info/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/microsoft/module-info/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/microsoft/module-info/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/microsoft/module-info/releases/tag/v0.5.0
