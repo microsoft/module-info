@@ -338,6 +338,21 @@ fn collect_package_metadata() -> ModuleInfoResult<PackageMetadata> {
 /// linker-script body are guaranteed to agree byte-for-byte, which is what
 /// keeps the `.note.package` section 4-byte aligned.
 pub(crate) fn render_note_payloads(md: &PackageMetadata) -> ModuleInfoResult<(String, String)> {
+    // Surface silent data loss: warn (don't fail) when a field carries
+    // characters that sanitization drops, naming the field and the lost
+    // characters so a value like `José` -> `Jos` is visible at build time.
+    for field in ModuleInfoField::ALL.iter().copied() {
+        let dropped = sanitize_dropped_chars(md.field_value(field));
+        if !dropped.is_empty() {
+            warn!(
+                "module_info: field {:?} drops non-embeddable characters {:?}; \
+                 embedding the ASCII-sanitized value instead",
+                field.to_key(),
+                dropped
+            );
+        }
+    }
+
     // Sanitize before serialization so JSON bytes and linker bytes agree.
     // Otherwise characters that expand/strip (`©` → `(c)`, non-ASCII) would
     // drift padding and break 4-byte alignment of the note section.
@@ -513,24 +528,47 @@ pub fn sanitize_for_linker_script(input: &str) -> String {
         .replace('®', "(r)")
         .replace('™', "(tm)")
         .chars()
-        .filter(|&c| {
-            // Must be plain ASCII so the emitted bytes are one-to-one with chars.
-            if !c.is_ascii() {
-                return false;
-            }
-            // Drop anything serde_json would escape, and anything that would
-            // otherwise break the emitted JSON string literal at runtime.
-            if c.is_control() {
-                return false;
-            }
-            if c == '"' || c == '\\' {
-                return false;
-            }
-            // Keep printable ASCII: alphanumeric, space, and the standard
-            // punctuation set (minus the quote / backslash we excluded above).
-            c.is_alphanumeric() || c == ' ' || c.is_ascii_punctuation()
-        })
+        .filter(|&c| is_linker_safe(c))
         .collect()
+}
+
+/// Whether `c` survives sanitization unchanged. Shared by
+/// [`sanitize_for_linker_script`] and [`sanitize_dropped_chars`] so the keep
+/// rule and the "what got dropped" report can never disagree.
+fn is_linker_safe(c: char) -> bool {
+    // Must be plain ASCII so the emitted bytes are one-to-one with chars.
+    if !c.is_ascii() {
+        return false;
+    }
+    // Drop anything serde_json would escape, and anything that would otherwise
+    // break the emitted JSON string literal at runtime.
+    if c.is_control() {
+        return false;
+    }
+    if c == '"' || c == '\\' {
+        return false;
+    }
+    // Keep printable ASCII: alphanumeric, space, and the standard punctuation
+    // set (minus the quote / backslash excluded above).
+    c.is_alphanumeric() || c == ' ' || c.is_ascii_punctuation()
+}
+
+/// Characters from `input` that [`sanitize_for_linker_script`] drops, after the
+/// ©/®/™ glyph mapping, de-duplicated and in first-seen order. Empty when the
+/// value embeds losslessly. Used to warn at build time so silent data loss
+/// (e.g. `José` -> `Jos`) is visible rather than mysterious.
+fn sanitize_dropped_chars(input: &str) -> String {
+    let mapped = input
+        .replace('©', "(c)")
+        .replace('®', "(r)")
+        .replace('™', "(tm)");
+    let mut dropped = String::new();
+    for c in mapped.chars() {
+        if !is_linker_safe(c) && !dropped.contains(c) {
+            dropped.push(c);
+        }
+    }
+    dropped
 }
 
 /// `&str` convenience wrapper over [`bytes_to_linker_directives`].
@@ -633,6 +671,26 @@ mod tests {
         let s = sanitize_for_linker_script("");
         assert_eq!(s, "");
         assert_sanitize_json_agreement("");
+    }
+
+    #[test]
+    fn dropped_chars_reports_lost_characters_only() {
+        // Mapped glyphs are not "dropped" (they embed as ASCII).
+        assert_eq!(sanitize_dropped_chars("Contoso©"), "");
+        // Pure ASCII loses nothing.
+        assert_eq!(sanitize_dropped_chars("plain ascii v1.2.3+build"), "");
+        // Accents, CJK, quote, and backslash are reported, de-duplicated and
+        // in first-seen order.
+        assert_eq!(sanitize_dropped_chars("José"), "é");
+        assert_eq!(sanitize_dropped_chars("a\"b\\c"), "\"\\");
+        assert_eq!(sanitize_dropped_chars("日本 é é 日"), "日本é");
+        // What's reported is exactly what sanitization removes.
+        let raw = "André 日本";
+        let kept: String = raw.chars().filter(|&c| is_linker_safe(c)).collect();
+        assert_eq!(kept, sanitize_for_linker_script(raw));
+        for c in sanitize_dropped_chars(raw).chars() {
+            assert!(!sanitize_for_linker_script(raw).contains(c));
+        }
     }
 
     #[test]
