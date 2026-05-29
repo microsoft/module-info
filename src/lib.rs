@@ -21,7 +21,8 @@
 //! the crate exposes no-op stubs so cross-platform builds still compile;
 //! runtime accessors return `ModuleInfoError::NotAvailable`.
 //!
-//! See the README and the `examples/` directory for an end-to-end integration.
+//! See the README (and `docs/GUIDE.md`) and the `examples/` directory for an
+//! end-to-end integration.
 //!
 //! # Limitations
 //!
@@ -47,8 +48,8 @@
 //! `cargo:rustc-link-arg` directive. The outer build (Make, CMake, MSBuild,
 //! …) passes that script to its own linker, at which point the
 //! `module_info_*` symbols are defined by the staticlib's linker script and
-//! the staticlib reads its own metadata. See "Option B" in the README for
-//! the full flow.
+//! the staticlib reads its own metadata. See "Option B" in `docs/GUIDE.md`
+//! for the full flow.
 //!
 //! **`cdylib` shared libraries loaded via `dlopen` are not affected.** A
 //! `cdylib` runs its own link step and applies its own linker script, so
@@ -807,7 +808,8 @@ pub fn print_module_info() -> ModuleInfoResult<()> {
     // `NotAvailable` directly, which propagates via `?`.
     let info = get_module_info!()?;
 
-    // Optional fields may legitimately be empty (see README "Disabling fields"),
+    // Optional fields may legitimately be empty (see "Disabling optional
+    // fields" in docs/GUIDE.md),
     // so only required keys are checked here.
     let missing: Vec<&str> = constants::REQUIRED_JSON_KEYS
         .iter()
