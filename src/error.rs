@@ -129,8 +129,9 @@ pub type ModuleInfoResult<T> = Result<T, ModuleInfoError>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::error::Error as _;
+
+    use super::*;
 
     /// Sweep every variant once: build it, run `Display::fmt`, and call
     /// `Error::source`. Together this exercises every match arm in
