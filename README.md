@@ -159,24 +159,18 @@ $ objcopy --dump-section .note.package=/dev/stdout ./your_binary
 
 ## Reading metadata from a core dump
 
-Embedding the note pays off here: because it sits in the first read-only page,
-it is captured in the core dump (under the kernel's default `coredump_filter`)
-even when the binary is gone. Enable core dumps, then read the metadata back:
+This is the payoff: because the note sits in the first read-only page, it is
+captured in the core dump even when the binary is gone. A core has no section
+headers, so pull a field straight out of the dumped bytes with `strings`:
 
 ```sh
-$ ulimit -c unlimited            # enable core dumps for this shell
-
-# A core file is an ELF image without section headers, so the JSON lives in the
-# dumped memory bytes. Pull a field out with strings:
 $ strings core | grep -oE '"moduleVersion":"[^"]+"'
 "moduleVersion":"0.1.0.0"
 ```
 
-On systemd hosts, `systemd-coredump` also records the metadata in the journal
-(`COREDUMP_PACKAGE_METADATA`); `coredumpctl info` / `journalctl` retrieve it.
-
-The `sample_crashing_process` example exercises this end to end. See the [full
-guide](docs/GUIDE.md#reading-from-a-core-dump) for the details.
+Or use `coredumpctl` on systemd hosts. The [full
+guide](docs/GUIDE.md#reading-from-a-core-dump) has the full commands, and the
+`sample_crashing_process` example exercises it end to end.
 
 ## Limitations
 
