@@ -419,11 +419,9 @@ fn validate_module_version(module_version: &str) -> ModuleInfoResult<()> {
     // core (e.g. `"7.5.3.0-PullRequest-12345"`). Validate only the numeric core
     // so the u16/4-part guarantee still holds; the suffix is informational and
     // ships verbatim. Inputs without a `-` or `+` behave identically to before.
-    let core = match (module_version.find('-'), module_version.find('+')) {
-        (Some(a), Some(b)) => module_version.get(..a.min(b)).unwrap_or(module_version),
-        (Some(a), None) => module_version.get(..a).unwrap_or(module_version),
-        (None, Some(b)) => module_version.get(..b).unwrap_or(module_version),
-        (None, None) => module_version,
+    let core = match metadata::suffix_start(module_version) {
+        Some(end) => module_version.get(..end).unwrap_or(module_version),
+        None => module_version,
     };
     let parts: Vec<&str> = core.split('.').collect();
     if parts.len() != 4 {

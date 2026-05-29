@@ -179,7 +179,7 @@ fn module_info_bool(package: &toml::Value, key: &str) -> bool {
 /// Locate the first `-` or `+` byte position, marking where a SemVer-style
 /// pre-release or build-metadata suffix begins. Returns `None` when neither
 /// separator is present.
-fn suffix_start(version_str: &str) -> Option<usize> {
+pub(crate) fn suffix_start(version_str: &str) -> Option<usize> {
     match (version_str.find('-'), version_str.find('+')) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (Some(a), None) => Some(a),
