@@ -7,6 +7,7 @@ This is the detailed reference for `module_info`. For a quick start, see the
 ## Contents
 
 - [How it works](#how-it-works)
+- [Limitations](#limitations)
 - [Metadata fields](#metadata-fields)
 - [Configuration](#configuration)
   - [Static values in `Cargo.toml`](#static-values-in-cargotoml)
@@ -53,6 +54,23 @@ consumes it without changes.
 > To read a statically linked library's own metadata, parse the note section
 > from the file on disk.
 
+## Limitations
+
+- **Linux/ELF only.** On other targets the build-time entry points are no-ops
+  and the runtime accessors return `NotAvailable`. The metadata is embedded
+  only in ELF objects.
+- **ASCII-only fields.** Values are sanitized to printable ASCII. `©`/`®`/`™`
+  map to `(c)`/`(r)`/`(tm)`; all other non-ASCII (accents, curly quotes, CJK,
+  em-dashes) is dropped, and `"`, `\`, and control characters are removed. See
+  [Security considerations](#security-considerations).
+- **1 KiB total.** The serialized JSON must fit in `MAX_JSON_SIZE` (1 KiB) or
+  the build fails with `MetadataTooLarge`. Glyph expansion (`©` -> `(c)`) counts
+  against the limit.
+- **Build-script context.** `generate_project_metadata_and_linker_script()` and
+  `embed_package_metadata()` must run inside a Cargo `build.rs`; they rely on
+  `OUT_DIR` and `CARGO_*`. See [Build-script context](#build-script-context).
+- **Minimum Rust 1.74.**
+
 ## Metadata fields
 
 Available through the `get_module_info!` macro:
@@ -76,22 +94,23 @@ Seven keys are **required** and must be non-empty: `binary`, `version`,
 `moduleVersion`, `name`, `maintainer`, `os`, `osVersion`. The rest (`type`,
 `repo`, `branch`, `hash`, `copyright`) are optional.
 
-Together they form the JSON record stored in `.note.package`:
+Together they form the JSON record stored in `.note.package` (one key/value
+pair per line, no spaces around the colon, ASCII-only):
 
 ```json
 {
-"binary": "sample_crashing_process",
-"moduleVersion": "0.1.0.0",
-"version": "0.1.0",
-"maintainer": "team@contoso.com",
-"name": "sample_crashing_process",
-"type": "tool",
-"repo": "module-info",
-"branch": "main",
-"hash": "9fbf13be41d9c29f056588f6ef97509e534a51f5",
-"copyright": "Contoso, Ltd.",
-"os": "ubuntu",
-"osVersion": "20.04"
+"binary":"sample_crashing_process",
+"moduleVersion":"0.1.0.0",
+"version":"0.1.0",
+"maintainer":"team@contoso.com",
+"name":"sample_crashing_process",
+"type":"tool",
+"repo":"module-info",
+"branch":"main",
+"hash":"9fbf13be41d9c29f056588f6ef97509e534a51f5",
+"copyright":"Contoso, Ltd.",
+"os":"ubuntu",
+"osVersion":"20.04"
 }
 ```
 
@@ -118,6 +137,9 @@ maintainer = "team@contoso.com"           # or a UUID like "cafeface-c0de-feed-b
 type = "agent"
 copyright = "Contoso, Ltd."
 ```
+
+`type` is a free-form label; common values are `agent`, `tool`, `util`,
+`library`, and `executable`, but any string your tooling expects works.
 
 ### Environment variables (CI build numbers)
 
@@ -410,7 +432,7 @@ use `pkg-config`.
 $ readelf -S ./sample_crashing_process
 ...
   [ 3] .note.package     NOTE             0000000000000390  00000390
-       00000000000001a6  0000000000000000   A       0     0     4
+       0000000000000154  0000000000000000   A       0     0     4
 ```
 
 Make sure `.note.package` is type `NOTE`, not `PROGBITS`.
@@ -478,6 +500,41 @@ $ read OFF SIZE < <(readelf -WS "$BIN" \
 $ hexdump -C -s "$OFF" -n "$SIZE" "$BIN"
 ```
 
+### Reading from a core dump
+
+Embedding the note is worthwhile because it survives in a core dump. The note
+is placed in the first read-only page (see [First-page
+placement](#first-page-placement)), so it is captured even in minimal dumps.
+
+Enable core dumps first:
+
+```sh
+$ ulimit -c unlimited
+# Also make sure /proc/sys/kernel/core_pattern routes dumps somewhere readable.
+```
+
+On a systemd host, `systemd-coredump` captures the dump and parses the FDO
+packaging metadata automatically:
+
+```sh
+$ coredumpctl list
+$ coredumpctl info <pid|name>              # surfaces the embedded package metadata
+$ coredumpctl dump <pid|name> --output core.dump
+```
+
+A raw core file is an ELF file **without section headers**, so `readelf -n
+core` reads the process notes (`NT_PRSTATUS`, ...), not `.note.package`. The
+embedded JSON is still present as bytes in the dumped first page; extract a
+field with `strings`:
+
+```sh
+$ strings core.dump | grep -oE '"moduleVersion":"[^"]+"' | cut -d'"' -f4
+0.1.0.0
+```
+
+The `sample_crashing_process` example crashes on demand so you can walk through
+this end to end.
+
 ## Unit tests
 
 Test that your embedded metadata is correct:
@@ -499,6 +556,9 @@ mod tests {
     }
 }
 ```
+
+`ModuleInfoField` does not need importing: the `get_module_info!` macro matches
+the variant name as a token.
 
 Run the crate's own tests with:
 
@@ -622,9 +682,12 @@ fn log_binary_info() {
   denial-of-service vectors. The seven required identity-plus-platform fields
   are checked to be present and non-empty (the rest may be empty when a
   consumer opts out; see [Disabling optional fields](#disabling-optional-fields)).
-- **Input sanitization.** All inputs are sanitized; control characters
-  (including `\n`, `\r`, `\t`) are stripped, so the payload is pure printable
-  ASCII.
+- **Input sanitization.** All field values are sanitized so the payload is pure
+  printable ASCII. Control characters (`\n`, `\r`, `\t`, ...) and the
+  JSON-significant `"` and `\` are removed. Non-ASCII characters are dropped,
+  except `©`/`®`/`™`, which map to `(c)`/`(r)`/`(tm)`. This means accented names
+  and other Unicode lose characters silently (`José` -> `Jos`); prefer an ASCII
+  spelling at the source.
 - **JSON validation.** The JSON structure is validated and required fields
   checked; malformed JSON is rejected with a descriptive error.
 - **Resource limitation.** OS-release file reading has a 10 KiB size limit;
@@ -644,8 +707,11 @@ information in metadata fields.
   `git@github.com:user/repo.git` → `repo`). Falls back to the project directory
   name when no remote is configured or git is unavailable.
 
-Requirements: git installed, code in a git repository. If git is unavailable,
-git-related fields show `"Unknown"`.
+Requirements: git installed, code in a git repository. If git is unavailable or
+a command fails, `branch` and `hash` fall back to `"unknown"` (lowercase), and
+`repo` falls back to the project directory name (or `"unknown"` if that too is
+unavailable). These are distinct from the `os`/`osVersion` fallbacks
+(`"Linux"`/`"Unknown"`), which apply only when `/etc/os-release` is missing.
 
 ### Build-script context
 

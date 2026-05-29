@@ -26,43 +26,45 @@ gone. `module-info` answers it from the core dump alone:
 - **Auto-detected.** Version, git branch/commit/repo, OS, and package details
   are collected at build time from `Cargo.toml`, git, and the OS. A typical
   setup needs three lines.
-- **Zero runtime cost.** Embedding happens entirely at build time. The runtime
-  read-back API is opt-in behind the `embed-module-info` feature.
+- **Build-time only.** The note is written during the build, so carrying it
+  costs nothing at runtime. Reading the metadata back from inside the running
+  process is optional and lives behind the `embed-module-info` feature.
 - **Executables and shared libraries.** Both carry their own `.note.package`.
 - **Cross-platform safe.** Compiles everywhere; it is a no-op on non-Linux
   targets, so the same source builds on Windows and macOS.
 
 ## What gets embedded
 
-A compact JSON record in the binary's `.note.package` section:
+A small JSON record in the binary's `.note.package` section, one key/value pair
+per line and ASCII-only (see [Limitations](#limitations)):
 
 ```json
 {
-"binary": "sample_crashing_process",
-"moduleVersion": "0.1.0.0",
-"version": "0.1.0",
-"maintainer": "team@contoso.com",
-"name": "sample_crashing_process",
-"type": "tool",
-"repo": "module-info",
-"branch": "main",
-"hash": "9fbf13be41d9c29f056588f6ef97509e534a51f5",
-"copyright": "Contoso, Ltd.",
-"os": "ubuntu",
-"osVersion": "20.04"
+"binary":"sample_crashing_process",
+"moduleVersion":"0.1.0.0",
+"version":"0.1.0",
+"maintainer":"team@contoso.com",
+"name":"sample_crashing_process",
+"type":"tool",
+"repo":"module-info",
+"branch":"main",
+"hash":"9fbf13be41d9c29f056588f6ef97509e534a51f5",
+"copyright":"Contoso, Ltd.",
+"os":"ubuntu",
+"osVersion":"20.04"
 }
 ```
 
-Reading it straight out of a binary (or a core dump) needs no special tooling.
-On binutils 2.39+, `readelf -n` decodes the note for you:
+Reading it back needs no special tooling. On binutils 2.39+, `readelf -n`
+decodes the note directly:
 
 ```sh
 $ readelf -n ./sample_crashing_process
 ...
 Displaying notes found in: .note.package
-  Owner       Data size   Description
-  FDO         0x000000a6  Packaging Metadata
-    {"binary":"sample_crashing_process","moduleVersion":"0.1.0.0", ... }
+  Owner                 Data size	Description
+  FDO                  0x00000141	FDO_PACKAGING_METADATA
+    Packaging Metadata: {"binary":"sample_crashing_process","moduleVersion":"0.1.0.0", ... }
 ```
 
 ## Quick start
@@ -73,6 +75,8 @@ Displaying notes found in: .note.package
 cargo add module-info --features embed-module-info
 cargo add --build module-info
 ```
+
+Requires Rust 1.74 or newer.
 
 **2. Add a `build.rs`** at your project root:
 
@@ -101,6 +105,13 @@ type = "agent"                    # optional
 copyright = "Contoso, Ltd."       # optional
 ```
 
+**How the three pieces fit.** The `[build-dependencies]` entry runs the build
+script, which collects the metadata and tells the linker to add the
+`.note.package` section. The `[dependencies]` entry plus the `embed-module-info`
+feature anchor that section in the final binary and provide the runtime
+read-back API. `module_info::embed!()` is that anchor; it expands to nothing on
+non-Linux targets, so the same source builds everywhere.
+
 ### Read it back at runtime (optional)
 
 ```rust
@@ -117,6 +128,9 @@ if let Ok(all) = get_module_info!() {
     }
 }
 ```
+
+`ModuleInfoField` does not need importing: the `get_module_info!` macro matches
+the variant name (e.g. `ModuleInfoField::Version`) as a token.
 
 Runtime read-back is a convenience; the main feature is that the metadata is
 recoverable from a crash dump without it.
@@ -137,6 +151,39 @@ $ readelf -n ./your_binary        # binutils ≥ 2.39 prints the JSON directly
 $ objcopy --dump-section .note.package=/dev/stdout ./your_binary
 ```
 
+## Reading metadata from a core dump
+
+Embedding the note pays off here: it is captured in the core dump even when the
+binary is gone, because the note sits in the first read-only page. Enable core
+dumps, then read the metadata back from the dump:
+
+```sh
+$ ulimit -c unlimited                          # enable core dumps for this shell
+
+# systemd hosts: systemd-coredump captures the dump and parses the
+# FDO packaging metadata for you.
+$ coredumpctl info <pid|name>                  # surfaces the embedded fields
+
+# Raw core file: the JSON bytes live in the dumped memory image. A core has no
+# section headers, so pull a field with strings rather than readelf -n.
+$ strings core | grep -oE '"moduleVersion":"[^"]+"'
+"moduleVersion":"0.1.0.0"
+```
+
+The `sample_crashing_process` example exercises this end to end. See the [full
+guide](docs/GUIDE.md#reading-from-a-core-dump) for the details.
+
+## Limitations
+
+- **Linux/ELF only.** On other targets embedding is a no-op (the build still
+  compiles) and the runtime accessors return `ModuleInfoError::NotAvailable`.
+- **ASCII-only fields.** Values are sanitized to printable ASCII. `©`/`®`/`™`
+  become `(c)`/`(r)`/`(tm)`; all other non-ASCII (accents, curly quotes, CJK)
+  is dropped, so prefer ASCII spellings at the source.
+- **1 KiB cap.** The whole JSON record must fit in 1 KiB or the build fails
+  with `MetadataTooLarge`.
+- **Requires Rust 1.74+** and a Cargo `build.rs` context.
+
 ## Learn more
 
 The [**full guide**](docs/GUIDE.md) covers everything beyond the basics:
@@ -154,6 +201,8 @@ The [**full guide**](docs/GUIDE.md) covers everything beyond the basics:
   [security](docs/GUIDE.md#security-considerations)
 
 API reference: [docs.rs/module-info](https://docs.rs/module-info).
+
+Changelog: [CHANGELOG.md](CHANGELOG.md). Security policy: [SECURITY.md](SECURITY.md).
 
 ## License
 
