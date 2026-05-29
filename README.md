@@ -63,9 +63,11 @@ $ readelf -n ./sample_crashing_process
 ...
 Displaying notes found in: .note.package
   Owner                 Data size	Description
-  FDO                  0x00000141	FDO_PACKAGING_METADATA
+  FDO                  0x00000144	FDO_PACKAGING_METADATA
     Packaging Metadata: {"binary":"sample_crashing_process","moduleVersion":"0.1.0.0", ... }
 ```
+
+(The exact `Data size` depends on your field values.)
 
 ## Quick start
 
@@ -110,7 +112,9 @@ script, which collects the metadata and tells the linker to add the
 `.note.package` section. The `[dependencies]` entry plus the `embed-module-info`
 feature anchor that section in the final binary and provide the runtime
 read-back API. `module_info::embed!()` is that anchor; it expands to nothing on
-non-Linux targets, so the same source builds everywhere.
+non-Linux targets, so the same source builds everywhere. In a workspace, each
+binary or shared library that should carry metadata needs its own `build.rs`
+and `embed!()` call.
 
 ### Read it back at runtime (optional)
 
@@ -147,28 +151,29 @@ recoverable from a crash dump without it.
 ## Verify it worked
 
 ```sh
-$ readelf -n ./your_binary        # binutils ≥ 2.39 prints the JSON directly
+$ readelf -n ./your_binary        # binutils >= 2.39 prints the JSON directly
 $ objcopy --dump-section .note.package=/dev/stdout ./your_binary
 ```
 
+`.note.package` is an allocated section, so it survives `strip`.
+
 ## Reading metadata from a core dump
 
-Embedding the note pays off here: it is captured in the core dump even when the
-binary is gone, because the note sits in the first read-only page. Enable core
-dumps, then read the metadata back from the dump:
+Embedding the note pays off here: because it sits in the first read-only page,
+it is captured in the core dump (under the kernel's default `coredump_filter`)
+even when the binary is gone. Enable core dumps, then read the metadata back:
 
 ```sh
-$ ulimit -c unlimited                          # enable core dumps for this shell
+$ ulimit -c unlimited            # enable core dumps for this shell
 
-# systemd hosts: systemd-coredump captures the dump and parses the
-# FDO packaging metadata for you.
-$ coredumpctl info <pid|name>                  # surfaces the embedded fields
-
-# Raw core file: the JSON bytes live in the dumped memory image. A core has no
-# section headers, so pull a field with strings rather than readelf -n.
+# A core file is an ELF image without section headers, so the JSON lives in the
+# dumped memory bytes. Pull a field out with strings:
 $ strings core | grep -oE '"moduleVersion":"[^"]+"'
 "moduleVersion":"0.1.0.0"
 ```
+
+On systemd hosts, `systemd-coredump` also records the metadata in the journal
+(`COREDUMP_PACKAGE_METADATA`); `coredumpctl info` / `journalctl` retrieve it.
 
 The `sample_crashing_process` example exercises this end to end. See the [full
 guide](docs/GUIDE.md#reading-from-a-core-dump) for the details.
@@ -177,6 +182,9 @@ guide](docs/GUIDE.md#reading-from-a-core-dump) for the details.
 
 - **Linux/ELF only.** On other targets embedding is a no-op (the build still
   compiles) and the runtime accessors return `ModuleInfoError::NotAvailable`.
+- **GNU ld / gold linker.** The note is placed with an `INSERT AFTER` linker
+  script. Alternative linkers (`lld`, `mold`) may not honor it; if you use one,
+  confirm the section is present with `readelf -n`.
 - **ASCII-only fields.** Values are sanitized to printable ASCII. `©`/`®`/`™`
   become `(c)`/`(r)`/`(tm)`; all other non-ASCII (accents, curly quotes, CJK)
   is dropped, so prefer ASCII spellings at the source.

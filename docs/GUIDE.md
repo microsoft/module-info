@@ -21,6 +21,7 @@ This is the detailed reference for `module_info`. For a quick start, see the
 - [Validation and inspection](#validation-and-inspection)
 - [Unit tests](#unit-tests)
 - [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
 - [Error handling](#error-handling)
 - [Security considerations](#security-considerations)
 - [Git metadata implementation](#git-metadata-implementation)
@@ -59,6 +60,9 @@ consumes it without changes.
 - **Linux/ELF only.** On other targets the build-time entry points are no-ops
   and the runtime accessors return `NotAvailable`. The metadata is embedded
   only in ELF objects.
+- **GNU ld / gold linker.** The section is placed with an `INSERT AFTER` linker
+  script (see [Troubleshooting](#troubleshooting)). `lld` and `mold` may handle
+  it differently; verify the section is present if you use them.
 - **ASCII-only fields.** Values are sanitized to printable ASCII. `©`/`®`/`™`
   map to `(c)`/`(r)`/`(tm)`; all other non-ASCII (accents, curly quotes, CJK,
   em-dashes) is dropped, and `"`, `\`, and control characters are removed. See
@@ -70,6 +74,8 @@ consumes it without changes.
   `embed_package_metadata()` must run inside a Cargo `build.rs`; they rely on
   `OUT_DIR` and `CARGO_*`. See [Build-script context](#build-script-context).
 - **Minimum Rust 1.74.**
+
+The section is allocated (the `A` flag in `readelf -S`), so it survives `strip`.
 
 ## Metadata fields
 
@@ -368,6 +374,13 @@ For [Azure DevOps Pipelines](https://learn.microsoft.com/en-us/azure/devops/pipe
 `GITHUB_RUN_NUMBER`, GitLab uses `CI_PIPELINE_IID`. If the variable is unset,
 the crate falls back to `Cargo.toml`'s `package.version`.
 
+These variables differ in shape. `GITHUB_RUN_NUMBER` and `CI_PIPELINE_IID` are
+bare incrementing integers (e.g. `42`), so they embed as `42.0.0` / `42.0.0.0`
+after padding, which is fine for `moduleVersion` (a build identifier) but is not
+a meaningful `version`. Azure's `BUILD_BUILDNUMBER` can be configured to a
+dotted version. Point each key at a variable whose shape matches what you want
+embedded.
+
 The embedded `moduleVersion` is intentionally separate from `Cargo.toml`'s
 `[package].version`. The latter is the SemVer string crates.io and `cargo` use
 for dependency resolution; `moduleVersion` is the 4-part build identifier (e.g.
@@ -475,7 +488,7 @@ $ objcopy --dump-section .note.package=/dev/stdout target/debug/sample_crashing_
 0.1.0.0
 ```
 
-Binutils ≥ 2.39 decodes the FDO Packaging Metadata note natively, so `readelf
+Binutils >= 2.39 decodes the FDO Packaging Metadata note natively, so `readelf
 -n` alone prints the JSON on a `Packaging Metadata:` line. Older `readelf -p`
 (binutils 2.34 ships with Ubuntu 20.04) truncates the printable-string dump
 once the payload exceeds an internal buffer, silently dropping the last field
@@ -504,22 +517,15 @@ $ hexdump -C -s "$OFF" -n "$SIZE" "$BIN"
 
 Embedding the note is worthwhile because it survives in a core dump. The note
 is placed in the first read-only page (see [First-page
-placement](#first-page-placement)), so it is captured even in minimal dumps.
+placement](#first-page-placement)), so it is captured as long as the kernel's
+`coredump_filter` dumps file-backed first pages, which the default does via its
+ELF-headers bit.
 
 Enable core dumps first:
 
 ```sh
 $ ulimit -c unlimited
 # Also make sure /proc/sys/kernel/core_pattern routes dumps somewhere readable.
-```
-
-On a systemd host, `systemd-coredump` captures the dump and parses the FDO
-packaging metadata automatically:
-
-```sh
-$ coredumpctl list
-$ coredumpctl info <pid|name>              # surfaces the embedded package metadata
-$ coredumpctl dump <pid|name> --output core.dump
 ```
 
 A raw core file is an ELF file **without section headers**, so `readelf -n
@@ -531,6 +537,12 @@ field with `strings`:
 $ strings core.dump | grep -oE '"moduleVersion":"[^"]+"' | cut -d'"' -f4
 0.1.0.0
 ```
+
+On a systemd host, `systemd-coredump` also records the packaging metadata in the
+journal as `COREDUMP_PACKAGE_METADATA`. Use `coredumpctl dump <match> --output
+core.dump` to write the core out for the `strings` step above; depending on the
+systemd version, `coredumpctl info` and `journalctl` may also display the stored
+metadata directly.
 
 The `sample_crashing_process` example crashes on demand so you can walk through
 this end to end.
@@ -605,9 +617,24 @@ $ ./examples/sample_elf_bin_with_lib/target/debug/sample_elf_bin_with_lib
 ```
 
 The standalone-package layout sidesteps the linker-script ordering issues that
-arise with cargo `[[example]]` entries. If you prefer not to clone the repo,
-copy any example's `Cargo.toml`, `build.rs`, and `src/` into a new crate, which
-is the same shape a real consumer uses.
+arise with cargo `[[example]]` entries. The `examples/` directory ships in the
+GitHub repository but is excluded from the published crate, so clone the repo to
+run them. If you prefer not to clone, copy any example's `Cargo.toml`,
+`build.rs`, and `src/` into a new crate, which is the same shape a real consumer
+uses.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| No `.note.package` section at all | The build script didn't run, or the linker dropped the section. | Confirm the `[build-dependencies]` entry and `build.rs` exist, call `module_info::embed!()` at the crate root, and enable the `embed-module-info` feature. |
+| Section missing only with `lld`/`mold` | Alternative linkers may not honor the `INSERT AFTER` linker script. | Build with GNU `ld`/`gold`, or verify the section landed and report the linker. |
+| Section present but typed `PROGBITS`, not `NOTE` | The linker emitted the bytes without the note type. | Check you are on a supported linker; inspect with `readelf -S`. |
+| `get_module_info!` returns `NotAvailable` on Linux | The `embed-module-info` feature is off. | Enable it: `features = ["embed-module-info"]`. |
+| Build fails with `MetadataTooLarge` | The JSON exceeds 1 KiB (glyph expansion like `©` -> `(c)` counts). | Shorten fields or drop optional ones. |
+| Build fails: `moduleVersion` part out of range / wrong part count | A part exceeds `u16` (65535), or there are not 4 numeric parts. | Use four dot-separated parts, each 0-65535; suffixes after `-`/`+` are stripped. |
+| A field is shorter than expected (e.g. `José` -> `Jos`) | Non-ASCII characters were stripped during sanitization. | Use an ASCII spelling; see [Limitations](#limitations). |
+| Embedded git hash looks stale | The build was not re-run. | The build script watches `.git/HEAD`, `.git/refs`, and `.git/packed-refs`, so a fresh commit normally retriggers it; run `cargo clean` if it did not. |
 
 ## Error handling
 
@@ -720,8 +747,12 @@ rely on Cargo-provided environment variables (`OUT_DIR`, `CARGO_MANIFEST_DIR`,
 `CARGO_PKG_*`) that only exist inside a `build.rs` invocation. Calling them
 elsewhere either errors with `OUT_DIR` missing or falls back to
 `"Unknown"`-shaped metadata. Both entry points also emit
-`cargo:rerun-if-changed=` / `cargo:rerun-if-env-changed=` directives, which are
-no-ops outside a build-script context.
+`cargo:rerun-if-changed=` / `cargo:rerun-if-env-changed=` directives. Among the
+watched paths are `.git/HEAD`, `.git/refs`, and `.git/packed-refs`, plus any
+configured `*_env_var_name` variables, so a new commit, branch switch, or
+changed build number retriggers the build and refreshes the embedded metadata
+rather than leaving it stale. These directives are no-ops outside a build-script
+context.
 
 ## Technical details
 
