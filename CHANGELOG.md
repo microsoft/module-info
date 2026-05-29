@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `allow_prerelease_suffix` key in `[package.metadata.module_info]`. When set
+  to `true`, `format_version_parts` keeps the SemVer-style pre-release /
+  build-metadata tail (everything from the first `-` or `+`) attached to the
+  formatted numeric core, so embedded values can carry CI build identifiers
+  like `"7.5.3.0-PullRequest-12345"` or `"5.2.100.0+build-42"`. Default is
+  `false`, preserving prior strip-on-`-`/`+` behavior for every existing
+  consumer.
+
+### Changed
+
+- `validate_module_version` now reads only the numeric core (up to the first
+  `-` / `+`) when enforcing the 4-part / u16 rule. Inputs without either
+  separator are unaffected. This lets the `allow_prerelease_suffix` path pass
+  through `validate_embedded_json` without weakening the u16 guardrail on the
+  numeric portion. Error messages for malformed input may shift between the
+  "exactly 4" and "16 bits" branches when the input begins with `-`, but the
+  Result-level behavior (Ok vs Err) is unchanged for all previously tested
+  inputs.
+
 ## [0.5.0] - 2026-04-21
 
 First public release on crates.io.

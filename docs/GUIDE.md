@@ -12,6 +12,7 @@ This is the detailed reference for `module_info`. For a quick start, see the
 - [Configuration](#configuration)
   - [Static values in `Cargo.toml`](#static-values-in-cargotoml)
   - [Environment variables (CI build numbers)](#environment-variables-ci-build-numbers)
+  - [Preserving SemVer-style pre-release / build suffixes](#preserving-semver-style-pre-release--build-suffixes)
   - [Disabling optional fields](#disabling-optional-fields)
   - [Debug output](#debug-output)
   - [Full `Cargo.toml` example](#full-cargotoml-example)
@@ -128,8 +129,9 @@ back out of a built binary or a core dump.
 
 ### Static values in `Cargo.toml`
 
-Only `maintainer`, `type`, `copyright`, `version_env_var_name`, and
-`module_version_env_var_name` are read from `[package.metadata.module_info]`.
+Only `maintainer`, `type`, `copyright`, `version_env_var_name`,
+`module_version_env_var_name`, and `allow_prerelease_suffix` are read from
+`[package.metadata.module_info]`.
 `version` comes from the outer `[package]` `version` field; `os`, `osVersion`,
 `repo`, `branch`, and `hash` are collected automatically from the build
 environment (env vars, git, `/etc/os-release`).
@@ -161,6 +163,35 @@ module_version_env_var_name = "BUILD_BUILDNUMBER"
 For example, Azure Pipelines exposes
 [`Build.BuildNumber`](https://learn.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml)
 as `BUILD_BUILDNUMBER`. See [CI integration](#ci-integration) for more.
+
+### Preserving SemVer-style pre-release / build suffixes
+
+By default, anything after the first `-` or `+` in the resolved version string
+is stripped before formatting, so a CI build number like
+`"7.5.3.0-PullRequest-12345"` embeds as `"7.5.3.0"`. Some pipelines want the
+buddy / PR identifier in the binary for traceability. Opt in by setting
+`allow_prerelease_suffix = true`:
+
+```toml
+[package.metadata.module_info]
+version_env_var_name = "BUILD_BUILDNUMBER"
+module_version_env_var_name = "BUILD_BUILDNUMBER"
+allow_prerelease_suffix = true
+```
+
+With this flag set, the numeric core is still normalized to 3 (`version`) or 4
+(`moduleVersion`) dot-separated u16 components and the same u16 range check runs
+against the numeric core, but the suffix (`-PullRequest-12345`, `+build-42`,
+etc.) is re-attached to the formatted result. The embedded values become:
+
+- `version` -> `"7.5.3-PullRequest-12345"`
+- `moduleVersion` -> `"7.5.3.0-PullRequest-12345"`
+
+Downstream consumers that parse `moduleVersion` as a strict 4-`WORD`
+[`VS_FIXEDFILEINFO`](https://learn.microsoft.com/en-us/windows/win32/api/verrsrc/ns-verrsrc-vs_fixedfileinfo)
+shape will see only the numeric core; suffix-aware tooling reads the full
+string. Keep the default (`false`) unless your consumer chain understands the
+suffix.
 
 ### Disabling optional fields
 
@@ -389,9 +420,11 @@ be identical, but in pipeline builds they normally diverge.
 
 ### Local reproduction
 
-Reproduce what the pipeline does by exporting the same variable. The crate
-strips SemVer-style `-<prerelease>` and `+<buildmeta>` suffixes before
-splitting on `.`, so pipeline-style build numbers normalize cleanly:
+Reproduce what the pipeline does by exporting the same variable. By default the
+crate strips SemVer-style `-<prerelease>` and `+<buildmeta>` suffixes before
+splitting on `.`, so pipeline-style build numbers normalize cleanly (to keep the
+suffix, see [Preserving SemVer-style pre-release / build
+suffixes](#preserving-semver-style-pre-release--build-suffixes)):
 
 ```bash
 # Plain dotted numeric: passes through unchanged.

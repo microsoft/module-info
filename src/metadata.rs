@@ -166,29 +166,54 @@ fn module_info_str<'a>(package: &'a toml::Value, key: &str) -> Option<&'a str> {
         .and_then(|v| v.as_str())
 }
 
-/// Normalize a dotted version string to exactly `parts` numeric components,
-/// padding missing trailing components with `0` and truncating extras.
-///
-/// SemVer-style pre-release / build-metadata suffixes (everything from the
-/// first `-` or `+`) are stripped before splitting so that Azure Pipelines
-/// build numbers like `"5.2.100.0-PullRequest-123456"` normalize cleanly
-/// to `"5.2.100.0"` (or `"5.2.100"` when `parts == 3`) instead of leaving a
-/// non-numeric tail that would fail the u16 check in
-/// `validate_module_version`.
-fn format_version_parts(version_str: &str, parts: usize) -> String {
-    // Strip pre-release / build-metadata suffix before splitting. Find the
-    // first `-` or `+` (whichever comes first) and cut there.
-    let cut = match (version_str.find('-'), version_str.find('+')) {
+/// Look up `package.metadata.module_info.<key>` as a bool, defaulting to `false`.
+fn module_info_bool(package: &toml::Value, key: &str) -> bool {
+    package
+        .get("metadata")
+        .and_then(|m| m.get("module_info"))
+        .and_then(|mi| mi.get(key))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
+/// Locate the first `-` or `+` byte position, marking where a SemVer-style
+/// pre-release or build-metadata suffix begins. Returns `None` when neither
+/// separator is present.
+pub(crate) fn suffix_start(version_str: &str) -> Option<usize> {
+    match (version_str.find('-'), version_str.find('+')) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (Some(a), None) => Some(a),
         (None, Some(b)) => Some(b),
         (None, None) => None,
-    };
+    }
+}
+
+/// Normalize a dotted version string to exactly `parts` numeric components,
+/// padding missing trailing components with `0` and truncating extras.
+///
+/// By default, SemVer-style pre-release / build-metadata suffixes (everything
+/// from the first `-` or `+`) are stripped before splitting so that Azure
+/// Pipelines build numbers like `"5.2.100.0-PullRequest-123456"` normalize
+/// cleanly to `"5.2.100.0"` (or `"5.2.100"` when `parts == 3`) instead of
+/// leaving a non-numeric tail that would fail the u16 check in
+/// `validate_module_version`.
+///
+/// When `preserve_suffix` is `true`, the numeric core is still normalized to
+/// `parts` components, but the suffix (including the leading `-` / `+`) is
+/// re-attached to the result so the embedded version carries the buddy/PR
+/// identifier. The caller opts in via `allow_prerelease_suffix = true` in
+/// `[package.metadata.module_info]`.
+fn format_version_parts(version_str: &str, parts: usize, preserve_suffix: bool) -> String {
+    let cut = suffix_start(version_str);
     let core = match cut {
         Some(end) => version_str.get(..end).unwrap_or(version_str),
         None => version_str,
     };
-    if core.len() != version_str.len() {
+    let suffix = match cut {
+        Some(end) if preserve_suffix => version_str.get(end..).unwrap_or(""),
+        _ => "",
+    };
+    if core.len() != version_str.len() && !preserve_suffix {
         warn!(
             "version string {:?} carries pre-release/build-metadata suffix; using numeric core {:?}",
             version_str, core
@@ -231,10 +256,15 @@ fn format_version_parts(version_str: &str, parts: usize) -> String {
             );
         }
     }
-    (0..parts)
+    let formatted = (0..parts)
         .map(|i| fields.get(i).copied().unwrap_or("0"))
         .collect::<Vec<_>>()
-        .join(".")
+        .join(".");
+    if suffix.is_empty() {
+        formatted
+    } else {
+        format!("{formatted}{suffix}")
+    }
 }
 
 /// Read `$env_var_name` (if set) and return its trimmed value, or `fallback`
@@ -293,10 +323,12 @@ fn collect_package_metadata() -> ModuleInfoResult<PackageMetadata> {
         println!("cargo:rerun-if-env-changed={name}");
     }
 
+    let allow_prerelease_suffix = module_info_bool(package, "allow_prerelease_suffix");
+
     let raw_version = env_or_default(version_env_var_name.as_deref(), &default_version);
-    let version = format_version_parts(&raw_version, 3);
+    let version = format_version_parts(&raw_version, 3, allow_prerelease_suffix);
     let raw_module_version = env_or_default(module_version_env_var_name.as_deref(), &raw_version);
-    let module_version = format_version_parts(&raw_module_version, 4);
+    let module_version = format_version_parts(&raw_module_version, 4, allow_prerelease_suffix);
 
     let (branch, hash, repo) = crate::utils::get_git_info()?;
 
@@ -709,27 +741,60 @@ mod tests {
     #[test]
     fn format_version_parts_strips_semver_suffix() {
         assert_eq!(
-            format_version_parts("5.2.100.0-PullRequest-123456", 4),
+            format_version_parts("5.2.100.0-PullRequest-123456", 4, false),
             "5.2.100.0"
         );
         assert_eq!(
-            format_version_parts("5.2.100.0-PullRequest-123456", 3),
+            format_version_parts("5.2.100.0-PullRequest-123456", 3, false),
             "5.2.100"
         );
         // SemVer pre-release label (`-beta.N`) is also stripped.
-        assert_eq!(format_version_parts("2.10.0-beta.3", 4), "2.10.0.0");
+        assert_eq!(format_version_parts("2.10.0-beta.3", 4, false), "2.10.0.0");
         // `+build` (SemVer build-metadata) is also stripped.
-        assert_eq!(format_version_parts("3.1.4+ci.42", 3), "3.1.4");
+        assert_eq!(format_version_parts("3.1.4+ci.42", 3, false), "3.1.4");
         // Plain numeric input is unchanged.
-        assert_eq!(format_version_parts("1.2.3.4", 4), "1.2.3.4");
+        assert_eq!(format_version_parts("1.2.3.4", 4, false), "1.2.3.4");
         // Padding behavior is preserved for short inputs.
-        assert_eq!(format_version_parts("1.2", 4), "1.2.0.0");
+        assert_eq!(format_version_parts("1.2", 4, false), "1.2.0.0");
         // Empty input must yield the all-zero fallback (not ".0.0" /
         // ".0.0.0" from `"".split('.')` returning `[""]`). A malformed
         // leading-dot result would fail downstream u16 validation with
         // a confusing "part 0 is empty" error.
-        assert_eq!(format_version_parts("", 3), "0.0.0");
-        assert_eq!(format_version_parts("", 4), "0.0.0.0");
+        assert_eq!(format_version_parts("", 3, false), "0.0.0");
+        assert_eq!(format_version_parts("", 4, false), "0.0.0.0");
+    }
+
+    /// Opt-in `preserve_suffix` keeps the numeric-core normalization but
+    /// reattaches the SemVer-style tail. This is the path enabled by
+    /// `allow_prerelease_suffix = true` in `[package.metadata.module_info]`.
+    #[test]
+    fn format_version_parts_preserves_suffix_when_opted_in() {
+        assert_eq!(
+            format_version_parts("7.5.3.0-PullRequest-12345", 4, true),
+            "7.5.3.0-PullRequest-12345"
+        );
+        assert_eq!(
+            format_version_parts("7.5.3.0-PullRequest-12345", 3, true),
+            "7.5.3-PullRequest-12345"
+        );
+        // Numeric core is still padded before the suffix is reattached.
+        assert_eq!(
+            format_version_parts("1.2-beta.3", 4, true),
+            "1.2.0.0-beta.3"
+        );
+        // Build-metadata (`+`) is preserved alongside the leading separator.
+        assert_eq!(
+            format_version_parts("3.1.4+ci.42", 4, true),
+            "3.1.4.0+ci.42"
+        );
+        // No suffix in input means output matches the strip-path behavior.
+        assert_eq!(format_version_parts("1.2.3.4", 4, true), "1.2.3.4");
+        // Whichever separator (`-` or `+`) appears first is the cut point and
+        // becomes the leading character of the preserved suffix.
+        assert_eq!(
+            format_version_parts("1.0.0+build-1", 4, true),
+            "1.0.0.0+build-1"
+        );
     }
 
     #[test]
