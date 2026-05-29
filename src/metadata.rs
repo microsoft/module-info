@@ -6,8 +6,8 @@ use std::env;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    utils::{bytes_to_linker_directives, get_cargo_toml_content, get_distro_info},
     ModuleInfoError, ModuleInfoField, ModuleInfoResult, NOTE_ALIGN,
+    utils::{bytes_to_linker_directives, get_cargo_toml_content, get_distro_info},
 };
 
 /// Package metadata for embedding in the ELF `.note.package` section.
