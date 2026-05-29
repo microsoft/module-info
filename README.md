@@ -310,8 +310,9 @@ The following metadata fields are available through the `get_module_info!` macro
 
 ### Using Static Values
 
-Only `maintainer`, `type`, `copyright`, `version_env_var_name`, and
-`module_version_env_var_name` are read from `[package.metadata.module_info]`.
+Only `maintainer`, `type`, `copyright`, `version_env_var_name`,
+`module_version_env_var_name`, and `allow_prerelease_suffix` are read from
+`[package.metadata.module_info]`.
 `version` comes from the outer `[package]` `version` field, and `os`,
 `osVersion`, `repo`, `branch`, `hash` are collected automatically from the
 build environment (env vars, git, `/etc/os-release`).
@@ -338,6 +339,36 @@ For example: For Azure Pipeline integration, [Build.BuildNumber](https://learn.m
 version_env_var_name = "BUILD_BUILDNUMBER"
 module_version_env_var_name = "BUILD_BUILDNUMBER"
 ```
+
+### Preserving SemVer-style pre-release / build suffixes
+
+By default, anything after the first `-` or `+` in the resolved version
+string is stripped before formatting, so a CI build number like
+`"7.5.3.0-PullRequest-12345"` embeds as `"7.5.3.0"`. Some pipelines want
+the buddy / PR identifier in the binary for traceability. Opt in by setting
+`allow_prerelease_suffix = true`:
+
+```toml
+[package.metadata.module_info]
+version_env_var_name = "BUILD_BUILDNUMBER"
+module_version_env_var_name = "BUILD_BUILDNUMBER"
+allow_prerelease_suffix = true
+```
+
+With this flag set, the numeric core is still normalized to 3 (`version`)
+or 4 (`moduleVersion`) dot-separated u16 components and the same u16 range
+check runs against the numeric core, but the suffix (`-PullRequest-12345`,
+`+build-42`, etc.) is re-attached to the formatted result. The embedded
+values become:
+
+- `version` → `"7.5.3-PullRequest-12345"`
+- `moduleVersion` → `"7.5.3.0-PullRequest-12345"`
+
+Downstream consumers that parse `moduleVersion` as a strict 4-`WORD`
+[`VS_FIXEDFILEINFO`](https://learn.microsoft.com/en-us/windows/win32/api/verrsrc/ns-verrsrc-vs_fixedfileinfo)
+shape will see only the numeric core; suffix-aware tooling reads the full
+string. Keep the default (`false`) unless your consumer chain understands
+the suffix.
 
 ### Disabling fields
 
