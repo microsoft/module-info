@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Build-time `cargo:warning` when a metadata field carries characters that
+  ASCII sanitization drops (e.g. `maintainer = "José"` embeds as `Jos`). Each
+  affected field is named along with the exact lost characters, so the loss is
+  visible at build time instead of silently shipping a truncated value. The
+  embedded bytes are unchanged; this only surfaces the loss.
+
 - `allow_prerelease_suffix` key in `[package.metadata.module_info]`. When set
   to `true`, `format_version_parts` keeps the SemVer-style pre-release /
   build-metadata tail (everything from the first `-` or `+`) attached to the

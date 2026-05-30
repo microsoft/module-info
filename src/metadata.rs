@@ -555,13 +555,21 @@ pub(crate) fn project_metadata() -> ModuleInfoResult<(String, String)> {
 /// # Example
 /// `"Contoso©"` → `"Contoso(c)"`; `"a\"b\nc"` → `"abc"`.
 pub fn sanitize_for_linker_script(input: &str) -> String {
+    map_glyphs(input)
+        .chars()
+        .filter(|&c| is_linker_safe(c))
+        .collect()
+}
+
+/// Transliterate the non-ASCII glyphs we map to ASCII (`©` → `(c)`, etc.)
+/// before the keep-filter runs. Shared by [`sanitize_for_linker_script`] and
+/// [`sanitize_dropped_chars`] so the two paths can never disagree on which
+/// characters survive as their ASCII spelling versus get reported as dropped.
+fn map_glyphs(input: &str) -> String {
     input
         .replace('©', "(c)")
         .replace('®', "(r)")
         .replace('™', "(tm)")
-        .chars()
-        .filter(|&c| is_linker_safe(c))
-        .collect()
 }
 
 /// Whether `c` survives sanitization unchanged. Shared by
@@ -590,10 +598,7 @@ fn is_linker_safe(c: char) -> bool {
 /// value embeds losslessly. Used to warn at build time so silent data loss
 /// (e.g. `José` -> `Jos`) is visible rather than mysterious.
 fn sanitize_dropped_chars(input: &str) -> String {
-    let mapped = input
-        .replace('©', "(c)")
-        .replace('®', "(r)")
-        .replace('™', "(tm)");
+    let mapped = map_glyphs(input);
     let mut dropped = String::new();
     for c in mapped.chars() {
         if !is_linker_safe(c) && !dropped.contains(c) {
