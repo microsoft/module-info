@@ -62,8 +62,8 @@ decodes the note directly:
 $ readelf -n ./sample_crashing_process
 ...
 Displaying notes found in: .note.package
-  Owner                 Data size	Description
-  FDO                  0x00000144	FDO_PACKAGING_METADATA
+  Owner                 Data size   Description
+  FDO                  0x00000144   FDO_PACKAGING_METADATA
     Packaging Metadata: {"binary":"sample_crashing_process","moduleVersion":"0.1.0.0", ... }
 ```
 
