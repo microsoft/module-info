@@ -9,7 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-29
+
 ### Added
+
+- Build-time `cargo:warning` when a metadata field carries characters that
+  ASCII sanitization drops (e.g. `maintainer = "José"` embeds as `Jos`). Each
+  affected field is named along with the exact lost characters, so the loss is
+  visible at build time instead of silently shipping a truncated value. The
+  embedded bytes are unchanged; this only surfaces the loss.
 
 - `allow_prerelease_suffix` key in `[package.metadata.module_info]`. When set
   to `true`, `format_version_parts` keeps the SemVer-style pre-release /
@@ -78,5 +86,6 @@ everywhere without `#[cfg]` guards at each call site.
 - `ModuleInfoError` / `ModuleInfoResult` with `#[non_exhaustive]` so new
   variants can land without a semver-major bump.
 
-[Unreleased]: https://github.com/microsoft/module-info/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/microsoft/module-info/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/microsoft/module-info/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/microsoft/module-info/releases/tag/v0.5.0
