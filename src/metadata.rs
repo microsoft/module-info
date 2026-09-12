@@ -385,24 +385,6 @@ pub(crate) fn render_note_payloads(md: &PackageMetadata) -> ModuleInfoResult<(St
         }
     }
 
-    // Sanitize before serialization so JSON bytes and linker bytes agree.
-    // Otherwise characters that expand/strip (`©` → `(c)`, non-ASCII) would
-    // drift padding and break 4-byte alignment of the note section.
-    let metadata = PackageMetadata {
-        binary: sanitize_for_linker_script(&md.binary),
-        module_version: sanitize_for_linker_script(&md.module_version),
-        version: sanitize_for_linker_script(&md.version),
-        maintainer: sanitize_for_linker_script(&md.maintainer),
-        name: sanitize_for_linker_script(&md.name),
-        module_type: sanitize_for_linker_script(&md.module_type),
-        repo: sanitize_for_linker_script(&md.repo),
-        branch: sanitize_for_linker_script(&md.branch),
-        hash: sanitize_for_linker_script(&md.hash),
-        copyright: sanitize_for_linker_script(&md.copyright),
-        os: sanitize_for_linker_script(&md.os),
-        os_version: sanitize_for_linker_script(&md.os_version),
-    };
-
     // Emit JSON and linker directives in lock-step so byte counts agree.
     // Manually emit newlines (not `serde_json::to_string`, which emits one line)
     // so `strings`/`readelf -n` show one key:value pair per line.
@@ -410,10 +392,21 @@ pub(crate) fn render_note_payloads(md: &PackageMetadata) -> ModuleInfoResult<(St
     let mut compact_json = String::new();
 
     // Iterate `ModuleInfoField::ALL` so the emitter stays in lock-step with the
-    // enum (exhaustive iteration surfaces missing/extra keys at compile time).
-    let entries: Vec<(&str, &str, &str)> = ModuleInfoField::ALL
+    // enum (exhaustive iteration surfaces missing/extra keys at compile time),
+    // sanitizing each value as it is read through `field_value`. Sanitizing here
+    // keeps the JSON bytes and linker bytes in agreement (characters that
+    // expand/strip such as `©` → `(c)` or non-ASCII would otherwise drift
+    // padding and break 4-byte alignment of the note section) and avoids a
+    // hand-maintained per-field list that could drift from `ModuleInfoField`.
+    let entries: Vec<(&str, &str, String)> = ModuleInfoField::ALL
         .iter()
-        .map(|f| (f.to_key(), f.to_symbol_name(), metadata.field_value(*f)))
+        .map(|f| {
+            (
+                f.to_key(),
+                f.to_symbol_name(),
+                sanitize_for_linker_script(md.field_value(*f)),
+            )
+        })
         .collect();
 
     // Derive padding from this running count, not `compact_json.len()`.
