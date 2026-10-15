@@ -50,7 +50,7 @@ We welcome feature suggestions! Please use the feature request template and prov
 ### Development Workflow
 
 1. Make sure you have Rust installed (we recommend using [rustup](https://rustup.rs/)).
-   The minimum supported Rust version (MSRV) is **1.74**, matching
+   The minimum supported Rust version (MSRV) is **1.85**, matching
    `rust-version` in `Cargo.toml`.
 2. Clone the repository
 3. Run `cargo build` to build the project

@@ -1,4 +1,4 @@
-# Weekly Dependabot update PRs. CI's MSRV-1.74 matrix gates every bump,
+# Weekly Dependabot update PRs. CI's MSRV-1.85 matrix gates every bump,
 # so a dep that raises the rust floor will fail the PR before it merges.
 version: 2
 updates:

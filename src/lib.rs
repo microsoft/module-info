@@ -822,7 +822,7 @@ pub fn print_module_info() -> ModuleInfoResult<()> {
     // so only required keys are checked here.
     let missing: Vec<&str> = constants::REQUIRED_JSON_KEYS
         .iter()
-        .filter(|key| info.get(**key).map_or(true, |v| v.is_empty()))
+        .filter(|key| info.get(**key).is_none_or(|v| v.is_empty()))
         .copied()
         .collect();
     if !missing.is_empty() {
@@ -1227,10 +1227,8 @@ mod tests {
 
         let tmp = tempfile::tempdir()?;
         let prior = std::env::var_os("OUT_DIR");
-        // SAFETY: `set_var`/`remove_var` are `unsafe` on Rust 1.80+ but
-        // safe on the MSRV (1.74). Use the safe API; CI's stable cell
-        // will warn but not fail because the deprecation is `unsafe`,
-        // not a compile error.
+        // `set_var`/`remove_var` are only `unsafe` in edition 2024. This
+        // crate is edition 2021, so the safe call is correct here.
         std::env::set_var("OUT_DIR", tmp.path());
         let result = new(Info {
             binary: "one_call_test".into(),
