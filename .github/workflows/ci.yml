@@ -408,7 +408,7 @@ jobs:
       with:
         toolchain: stable
     - name: Run cargo-deny
-      uses: EmbarkStudios/cargo-deny-action@a531616d8ce3b9177443e48a1159bc945a099823 # v2.0.19
+      uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
       with:
         # `check all` runs advisories + bans + licenses + sources. For an
         # OSS crate on crates.io the licenses check is particularly valuable
