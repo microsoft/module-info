@@ -40,17 +40,19 @@ jobs:
         rust: [stable, "1.74.0"]
 
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
     # All actions (first-party `actions/*` and third-party) are SHA-pinned per
     # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions.
-    # `dtolnay/rust-toolchain` ships no versioned tags, so the trailing `# stable`
-    # comment tracks intent. Dependabot keeps the SHAs fresh on its weekly run.
+    # `dtolnay/rust-toolchain` is pinned to its `v1` tag (a `master` commit)
+    # and every use passes `toolchain:` explicitly. Never pin a commit from its
+    # `stable`/`nightly` branches: upstream rebuilds those on every update,
+    # so the pinned commit drops off every branch.
     - name: Set up Rust
-      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
       with:
         toolchain: ${{ matrix.rust }}
 
@@ -87,12 +89,12 @@ jobs:
         # their dep graphs that the main-crate `test` matrix wouldn't see.
         rust: [stable, "1.74.0"]
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
       with:
         toolchain: ${{ matrix.rust }}
         # Only the stable cell runs the rustfmt/clippy gates below; skip
@@ -214,13 +216,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
       with:
+        toolchain: stable
         components: rustfmt
     - run: cargo fmt --all -- --check
 
@@ -229,13 +232,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
       with:
+        toolchain: stable
         components: clippy
     - name: Clippy (default features)
       run: cargo clippy --all-targets --locked -- -D warnings
@@ -254,12 +258,14 @@ jobs:
     env:
       RUSTDOCFLAGS: "-Dwarnings"
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+      with:
+        toolchain: stable
     - name: Generate documentation
       run: cargo doc --no-deps --features embed-module-info --locked
 
@@ -275,13 +281,14 @@ jobs:
     # upload step after the `cargo llvm-cov` invocation; intentionally
     # left out here to avoid requiring a third-party token.
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
       with:
+        toolchain: stable
         # `llvm-tools-preview` ships the `llvm-profdata`/`llvm-cov` that
         # `cargo-llvm-cov` shells out to; without it the coverage build
         # fails with "llvm-tools not found".
@@ -329,7 +336,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -359,7 +366,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
@@ -373,12 +380,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+      with:
+        toolchain: stable
     # Inspect the file list that `cargo publish` would upload. Catches
     # internal files leaking into the published tarball if the `exclude`
     # block in Cargo.toml drifts. `--allow-dirty` keeps the check robust
@@ -390,12 +399,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
         # PR jobs build untrusted code; clear the workflow token from
         # `.git/config` so a malicious build script can't exfiltrate it.
         persist-credentials: false
-    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+    - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+      with:
+        toolchain: stable
     - name: Run cargo-deny
       uses: EmbarkStudios/cargo-deny-action@a531616d8ce3b9177443e48a1159bc945a099823 # v2.0.19
       with:

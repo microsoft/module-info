@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 30
     steps:
       # Full history so `git merge-base --is-ancestor` below can walk main.
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -49,11 +49,15 @@ jobs:
 
       # All actions (first-party `actions/*` and third-party) are SHA-pinned
       # because this workflow has access to CRATES_IO_TOKEN downstream.
-      # `dtolnay/rust-toolchain` ships no versioned tags; the trailing
-      # `# stable` comment tracks intent.
+      # `dtolnay/rust-toolchain` is pinned to its `v1` tag (a `master`
+      # commit) with an explicit `toolchain:`. Never pin a commit from its
+      # `stable`/`nightly` branches: upstream rebuilds those on every
+      # update, so the pinned commit drops off every branch.
       # See: https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
 
       - name: Verify Cargo.toml matches tag
         # `cargo metadata | jq` is sturdier than grep+sed on Cargo.toml,
@@ -105,12 +109,14 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
 
       # Materialize the .crate tarball before attestation so the file path
       # passed to the attest step is the exact byte-for-byte artifact
@@ -146,7 +152,7 @@ jobs:
       # softprops/action-gh-release needs to create the GitHub Release.
       contents: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
