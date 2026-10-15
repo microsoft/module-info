@@ -85,7 +85,9 @@ jobs:
       # feature-flag mistake fails verify before the irreversible real
       # publish runs in the next job. crates.io versions are immutable
       # (`yank` exists but `delete` does not), so burning one on a
-      # misconfigured publish is expensive.
+      # misconfigured publish is expensive. This is also the only place the
+      # packaged crate is compiled: that build runs dependency build
+      # scripts and proc-macros, so it must stay in this secret-free job.
       - name: Publish dry-run
         run: cargo publish --dry-run --verbose --locked
 
@@ -93,6 +95,13 @@ jobs:
   # gates `CRATES_IO_TOKEN` behind a manual approval gate configured in
   # the repository's environment settings (Settings → Environments →
   # crates-io → Required reviewers). Tag-push alone cannot auto-publish.
+  #
+  # This job must never compile code (no `cargo build`/`test`, no
+  # `cargo package` or `cargo publish` without `--no-verify`) and must not
+  # restore caches or artifacts from `verify`. Compiling runs dependency
+  # build scripts and proc-macros, and runner state persists across steps
+  # (`$GITHUB_ENV`, `$GITHUB_PATH`, background processes), so any of them
+  # could steal the token injected into the publish step below.
   publish:
     name: Publish to crates.io
     needs: verify
@@ -118,13 +127,13 @@ jobs:
         with:
           toolchain: stable
 
-      # Materialize the .crate tarball before attestation so the file path
-      # passed to the attest step is the exact byte-for-byte artifact
-      # `cargo publish --no-verify` will upload below. `cargo publish`
-      # without --no-verify re-packages internally, which would attest one
-      # tarball and ship a freshly-rebuilt different one.
+      # Materialize the .crate tarball so it can be attested. `--no-verify`
+      # only writes the tarball; it compiles nothing (the `verify` job
+      # already build-checked the package). Packaging is deterministic, so
+      # `cargo publish --no-verify` below re-creates and uploads the same
+      # bytes that are attested here.
       - name: Package crate
-        run: cargo package --locked
+        run: cargo package --no-verify --locked
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -134,10 +143,9 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        # --no-verify skips the re-package + re-build that `cargo publish`
-        # does by default. Safe here because the `verify` job already
-        # built/tested with the same Cargo.lock, and `cargo package` above
-        # just produced the tarball we attested.
+        # `--no-verify` is required: without it `cargo publish` compiles
+        # the package (running dependency build scripts) while
+        # CARGO_REGISTRY_TOKEN is in the environment.
         run: cargo publish --verbose --locked --no-verify
 
   # Stage 3: create the GitHub Release. Runs last so a failed crates.io
