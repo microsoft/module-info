@@ -74,7 +74,7 @@ consumes it without changes.
 - **Build-script context.** `generate_project_metadata_and_linker_script()` and
   `embed_package_metadata()` must run inside a Cargo `build.rs`; they rely on
   `OUT_DIR` and `CARGO_*`. See [Build-script context](#build-script-context).
-- **Minimum Rust 1.74.**
+- **Minimum Rust 1.85.**
 
 The section is allocated (the `A` flag in `readelf -S`), so it survives `strip`.
 

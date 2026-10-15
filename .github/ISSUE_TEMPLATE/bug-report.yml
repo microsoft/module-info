@@ -32,7 +32,7 @@ body:
     attributes:
       label: Rust toolchain version
       description: Output of `rustc --version`.
-      placeholder: "e.g. rustc 1.74.0 (79e9716c9 2023-11-13)"
+      placeholder: "e.g. rustc 1.85.0 (4d91de4e4 2025-02-17)"
     validations:
       required: true
 

@@ -34,10 +34,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pin to the exact MSRV (1.74.0). `"1.74"` would resolve to the
-        # latest 1.74.x patch and let a regression in a patch release ride
+        # Pin to the exact MSRV (1.85.0). `"1.85"` would resolve to the
+        # latest 1.85.x patch and let a regression in a patch release ride
         # in undetected.
-        rust: [stable, "1.74.0"]
+        rust: [stable, "1.85.0"]
 
     steps:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -84,10 +84,10 @@ jobs:
           - sample_crashing_process
         # Build/test each example on both stable and the MSRV. fmt + clippy
         # only run on stable (lint output drifts between toolchains; we
-        # don't want to gate on whichever lint set 1.74 happened to ship).
+        # don't want to gate on whichever lint set 1.85 happened to ship).
         # The MSRV cell catches MSRV regressions in example sources or
         # their dep graphs that the main-crate `test` matrix wouldn't see.
-        rust: [stable, "1.74.0"]
+        rust: [stable, "1.85.0"]
     steps:
     - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       with:
