@@ -78,7 +78,7 @@ cargo add module-info --features embed-module-info
 cargo add --build module-info
 ```
 
-Requires Rust 1.74 or newer.
+Requires Rust 1.85 or newer.
 
 **2. Add a `build.rs`** at your project root:
 
@@ -184,7 +184,7 @@ guide](docs/GUIDE.md#reading-from-a-core-dump) has the full commands, and the
   is dropped, so prefer ASCII spellings at the source.
 - **1 KiB cap.** The whole JSON record must fit in 1 KiB or the build fails
   with `MetadataTooLarge`.
-- **Requires Rust 1.74+** and a Cargo `build.rs` context.
+- **Requires Rust 1.85+** and a Cargo `build.rs` context.
 
 ## Learn more
 

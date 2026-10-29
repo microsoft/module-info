@@ -2,7 +2,7 @@
 name = "module-info"
 version = "0.5.1"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.85"
 authors = ["Microsoft Corporation <opencode@microsoft.com>"]
 description = "Embeds metadata into ELF binaries as note sections for Rust projects on Linux, providing runtime access and crash dump info"
 license = "MIT"
@@ -43,24 +43,21 @@ copyright = "Microsoft Corporation"
 cfg-if = "1.0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# `toml` 0.8.x has rust-version = 1.66; pinning here keeps the resolver from
-# pulling 0.9.x (rust-version 1.76), which would push our MSRV above 1.74.
+# `toml` stays on 0.8.x. Newer majors fit the MSRV but change the API, so
+# upgrade them separately.
 toml = "0.8.20"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-# Transitive of `toml`; newer `indexmap` releases bumped MSRV beyond 1.74
-# (2.10 → rust 1.74; 2.13 → 1.82; 2.14 → edition 2024 / 1.85). Cap so
-# downstream consumers on rust 1.74 keep resolving a compatible version.
-# Bump the upper bound together with the crate's MSRV.
-indexmap = ">=2,<2.10"
+# Transitive of `toml`. Cap at the newest minor known to build on the MSRV
+# (2.14 needs rust 1.85) so downstream consumers on rust 1.85 keep resolving
+# a compatible version. Bump the upper bound together with the crate's MSRV.
+indexmap = ">=2,<2.15"
 # Non-Linux targets will use these empty/stub implementations
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # Empty dependencies for non-Linux targets
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-# Newer `tempfile` (3.20+) depends on `getrandom` 0.4, whose MSRV is 1.85.
-# Cap so the dev-dep tree stays buildable on 1.74. Bump together with MSRV.
-tempfile = ">=3.10,<3.20"
+tempfile = "3.10"
 
 [features]
 # Enable module info embedding in ELF binaries
