@@ -83,6 +83,20 @@ cargo build --manifest-path examples/sample_elf_bin/Cargo.toml
 cargo test  --manifest-path examples/sample_elf_bin/Cargo.toml
 ```
 
+## Dependency maintenance
+
+Dependabot groups routine patch and minor updates into one PR per ecosystem:
+Rust crates monthly and GitHub Actions weekly. Actions are pinned by commit
+SHA, and GitHub does not raise security alerts or security PRs for SHA-pinned
+actions, so the weekly update is how their fixes arrive. Each ecosystem allows
+two open version-update PRs, so a major update (always separate) does not
+block the next batch.
+
+Review every update: patch and minor releases, especially for pre-1.0 crates,
+can still break builds. Keep Dependabot alerts and security updates enabled;
+Rust security fixes do not wait for the monthly schedule. Existing review and
+validation requirements still apply.
+
 ## Style Guidelines
 
 - Follow the standard Rust style guidelines.
