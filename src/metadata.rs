@@ -385,24 +385,6 @@ pub(crate) fn render_note_payloads(md: &PackageMetadata) -> ModuleInfoResult<(St
         }
     }
 
-    // Sanitize before serialization so JSON bytes and linker bytes agree.
-    // Otherwise characters that expand/strip (`©` → `(c)`, non-ASCII) would
-    // drift padding and break 4-byte alignment of the note section.
-    let metadata = PackageMetadata {
-        binary: sanitize_for_linker_script(&md.binary),
-        module_version: sanitize_for_linker_script(&md.module_version),
-        version: sanitize_for_linker_script(&md.version),
-        maintainer: sanitize_for_linker_script(&md.maintainer),
-        name: sanitize_for_linker_script(&md.name),
-        module_type: sanitize_for_linker_script(&md.module_type),
-        repo: sanitize_for_linker_script(&md.repo),
-        branch: sanitize_for_linker_script(&md.branch),
-        hash: sanitize_for_linker_script(&md.hash),
-        copyright: sanitize_for_linker_script(&md.copyright),
-        os: sanitize_for_linker_script(&md.os),
-        os_version: sanitize_for_linker_script(&md.os_version),
-    };
-
     // Emit JSON and linker directives in lock-step so byte counts agree.
     // Manually emit newlines (not `serde_json::to_string`, which emits one line)
     // so `strings`/`readelf -n` show one key:value pair per line.
@@ -410,10 +392,21 @@ pub(crate) fn render_note_payloads(md: &PackageMetadata) -> ModuleInfoResult<(St
     let mut compact_json = String::new();
 
     // Iterate `ModuleInfoField::ALL` so the emitter stays in lock-step with the
-    // enum (exhaustive iteration surfaces missing/extra keys at compile time).
-    let entries: Vec<(&str, &str, &str)> = ModuleInfoField::ALL
+    // enum (exhaustive iteration surfaces missing/extra keys at compile time),
+    // sanitizing each value as it is read through `field_value`. Sanitizing here
+    // keeps the JSON bytes and linker bytes in agreement (characters that
+    // expand/strip such as `©` → `(c)` or non-ASCII would otherwise drift
+    // padding and break 4-byte alignment of the note section) and avoids a
+    // hand-maintained per-field list that could drift from `ModuleInfoField`.
+    let entries: Vec<(&str, &str, String)> = ModuleInfoField::ALL
         .iter()
-        .map(|f| (f.to_key(), f.to_symbol_name(), metadata.field_value(*f)))
+        .map(|f| {
+            (
+                f.to_key(),
+                f.to_symbol_name(),
+                sanitize_for_linker_script(md.field_value(*f)),
+            )
+        })
         .collect();
 
     // Derive padding from this running count, not `compact_json.len()`.
@@ -616,6 +609,52 @@ fn bytes_to_linker_script_format(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rendered_fields_preserve_json_and_linker_bytes() {
+        let md = PackageMetadata {
+            binary: "tool©".into(),
+            version: "1.2.3".into(),
+            module_version: "1.2.3.4".into(),
+            maintainer: "Jos\u{e9}\"\\\n".into(),
+            name: "tool".into(),
+            module_type: String::new(),
+            repo: "project/a*/b".into(),
+            branch: "feat\ture".into(),
+            hash: "deadbeef".into(),
+            copyright: "Contoso™".into(),
+            os: "linux".into(),
+            os_version: "1".into(),
+        };
+        let expected = concat!(
+            "{\n",
+            "\"binary\":\"tool(c)\",\n",
+            "\"version\":\"1.2.3\",\n",
+            "\"moduleVersion\":\"1.2.3.4\",\n",
+            "\"maintainer\":\"Jos\",\n",
+            "\"name\":\"tool\",\n",
+            "\"type\":\"\",\n",
+            "\"repo\":\"project/a*/b\",\n",
+            "\"branch\":\"feature\",\n",
+            "\"hash\":\"deadbeef\",\n",
+            "\"copyright\":\"Contoso(tm)\",\n",
+            "\"os\":\"linux\",\n",
+            "\"osVersion\":\"1\"\n",
+            "}",
+        );
+        let (json, script) = render_note_payloads(&md).expect("render metadata");
+        assert_eq!(json, expected);
+
+        let bytes: Vec<u8> = script
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("BYTE(0x"))
+            .filter_map(|hex| hex.strip_suffix(");"))
+            .map(|hex| u8::from_str_radix(hex, 16).expect("hexadecimal byte"))
+            .collect();
+        let mut expected_bytes = expected.as_bytes().to_vec();
+        expected_bytes.resize(expected.len() + NOTE_ALIGN - expected.len() % NOTE_ALIGN, 0);
+        assert_eq!(bytes, expected_bytes);
+    }
 
     /// After sanitizing, the bytes `serde_json::to_string` emits for the value
     /// must equal the raw bytes the linker script writes (the value wrapped in
