@@ -1,86 +1,27 @@
 # Module Info
 
-Embed build-time metadata (version, git commit, maintainer, OS) into your
-Rust binary so **it survives crashes**. The data lives in an ELF
-`.note.package` section, so when your process dies and dumps core, the metadata
-travels with it. Tools like `coredumpctl`, `readelf -n`, and GDB see exactly
-which build crashed, even if the binary has been redeployed or deleted.
+**Identify which Rust build crashed on Linux.**
+
+`module-info` stores the version, Git commit, and other build details in an
+ELF note: a metadata section in a Linux binary. Read it without debug symbols,
+or recover it from a core dump that captured the section.
 
 [![crates.io](https://img.shields.io/crates/v/module-info.svg)](https://crates.io/crates/module-info)
 [![Documentation](https://docs.rs/module-info/badge.svg)](https://docs.rs/module-info)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Why module-info?
-
-When a deployed binary crashes, the hardest question is often "which build was
-this?" Symbol files get lost, tags drift, and the binary on disk may already be
-gone. `module-info` answers it from the core dump alone:
-
-- **Survives the crash.** The metadata is an ELF note baked into the image, so
-  it is captured in the core dump even if the binary has been redeployed or
-  deleted.
-- **Standard, tool-ready format.** Follows the [systemd package-metadata
-  spec](https://uapi-group.org/specifications/specs/package_metadata_for_executable_files/),
-  so `coredumpctl`, `readelf -n`, GDB, and existing crash-analysis tooling read
-  it with no changes.
-- **Auto-detected.** Version, git branch/commit/repo, OS, and package details
-  are collected at build time from `Cargo.toml`, git, and the OS. A typical
-  setup needs three lines.
-- **Build-time only.** The note is written during the build, so carrying it
-  costs nothing at runtime. Reading the metadata back from inside the running
-  process is optional and lives behind the `embed-module-info` feature.
-- **Executables and shared libraries.** Both carry their own `.note.package`.
-- **Cross-platform safe.** Compiles everywhere; it is a no-op on non-Linux
-  targets, so the same source builds on Windows and macOS.
-
-## What gets embedded
-
-A small JSON record in the binary's `.note.package` section, one key/value pair
-per line and ASCII-only (see [Limitations](#limitations)):
-
-```json
-{
-"binary":"sample_crashing_process",
-"moduleVersion":"0.1.0.0",
-"version":"0.1.0",
-"maintainer":"team@contoso.com",
-"name":"sample_crashing_process",
-"type":"tool",
-"repo":"module-info",
-"branch":"main",
-"hash":"9fbf13be41d9c29f056588f6ef97509e534a51f5",
-"copyright":"Contoso, Ltd.",
-"os":"ubuntu",
-"osVersion":"20.04"
-}
-```
-
-Reading it back needs no special tooling. On binutils 2.39+, `readelf -n`
-decodes the note directly:
-
-```sh
-$ readelf -n ./sample_crashing_process
-...
-Displaying notes found in: .note.package
-  Owner                 Data size   Description
-  FDO                  0x00000144   FDO_PACKAGING_METADATA
-    Packaging Metadata: {"binary":"sample_crashing_process","moduleVersion":"0.1.0.0", ... }
-```
-
-(The exact `Data size` depends on your field values.)
-
 ## Quick start
 
-**1. Add the dependency.**
+Requires Rust 1.85+ and a supported Linux build. In your crate:
+
+**1. Add runtime and build dependencies.**
 
 ```sh
 cargo add module-info --features embed-module-info
 cargo add --build module-info
 ```
 
-Requires Rust 1.85 or newer.
-
-**2. Add a `build.rs`** at your project root:
+**2. Create `build.rs`:**
 
 ```rust
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -89,122 +30,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-**3. Embed the note** by adding one macro at your crate root (`src/main.rs` or
-`src/lib.rs`):
+**3. Add this at the top of `src/main.rs` or `src/lib.rs`:**
 
 ```rust
 module_info::embed!();
 ```
 
-That's it. Your binary now carries its metadata. Most fields are detected
-automatically from `Cargo.toml`, git, and the OS. To set the maintainer and a
-few extras, add this to `Cargo.toml`:
+The build collects package, Git, and build-host OS details automatically.
+Set a maintainer in `Cargo.toml`:
 
 ```toml
 [package.metadata.module_info]
-maintainer = "team@contoso.com"   # contact email or team UUID
-type = "agent"                    # optional
-copyright = "Contoso, Ltd."       # optional
+maintainer = "team@contoso.com"
 ```
 
-**How the three pieces fit.** The `[build-dependencies]` entry runs the build
-script, which collects the metadata and tells the linker to add the
-`.note.package` section. The `[dependencies]` entry plus the `embed-module-info`
-feature anchor that section in the final binary and provide the runtime
-read-back API. `module_info::embed!()` is that anchor; it expands to nothing on
-non-Linux targets, so the same source builds everywhere. In a workspace, each
-binary or shared library that should carry metadata needs its own `build.rs`
-and `embed!()` call.
-
-### Read it back at runtime (optional)
-
-```rust
-use module_info::get_module_info;
-
-if let Ok(version) = get_module_info!(ModuleInfoField::Version) {
-    println!("Version: {version}");
-}
-
-// Or grab everything as a HashMap:
-if let Ok(all) = get_module_info!() {
-    for (key, value) in all {
-        println!("{key}: {value}");
-    }
-}
-```
-
-`ModuleInfoField` does not need importing: the `get_module_info!` macro matches
-the variant name (e.g. `ModuleInfoField::Version`) as a token.
-
-Runtime read-back is a convenience; the main feature is that the metadata is
-recoverable from a crash dump without it.
-
-## Platform support
-
-- **Linux:** full functionality. Emits the `.note.package` section at build
-  time; runtime accessors read it back.
-- **Windows / macOS / other:** no-op. Nothing is embedded, build-script entry
-  points compile to empty stubs (so the same source builds everywhere), and the
-  runtime accessors return `ModuleInfoError::NotAvailable`, so handle that in
-  cross-platform code.
+Each executable or shared-library package needs its own setup.
 
 ## Verify it worked
 
 ```sh
-$ readelf -n ./your_binary        # binutils >= 2.39 prints the JSON directly
-$ objcopy --dump-section .note.package=/dev/stdout ./your_binary
+cargo build
+readelf -n target/debug/your_binary
 ```
 
-`.note.package` is an allocated section, so it survives `strip`.
+With binutils 2.39+, look for:
 
-## Reading metadata from a core dump
-
-This is the payoff: because the note sits in the first read-only page, it is
-captured in the core dump even when the binary is gone. A core has no section
-headers, so pull a field straight out of the dumped bytes with `strings`:
-
-```sh
-$ strings core | grep -oE '"moduleVersion":"[^"]+"'
-"moduleVersion":"0.1.0.0"
+```text
+Displaying notes found in: .note.package
+...
+    Packaging Metadata: ...
 ```
 
-Or use `coredumpctl` on systemd hosts. The [full
-guide](docs/GUIDE.md#reading-from-a-core-dump) has the full commands, and the
-`sample_crashing_process` example exercises it end to end.
+For crash analysis, see [reading a core dump](docs/GUIDE.md#reading-from-a-core-dump).
+
+## Read the version at runtime
+
+Runtime access is optional:
+
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Version: {}", module_info::get_version()?);
+    Ok(())
+}
+```
 
 ## Limitations
 
-- **Linux/ELF only.** On other targets embedding is a no-op (the build still
-  compiles) and the runtime accessors return `ModuleInfoError::NotAvailable`.
-- **GNU ld / gold linker.** The note is placed with an `INSERT AFTER` linker
-  script. Alternative linkers (`lld`, `mold`) may not honor it; if you use one,
-  confirm the section is present with `readelf -n`.
-- **ASCII-only fields.** Values are sanitized to printable ASCII. `©`/`®`/`™`
-  become `(c)`/`(r)`/`(tm)`; all other non-ASCII (accents, curly quotes, CJK)
-  is dropped, so prefer ASCII spellings at the source.
-- **1 KiB cap.** The whole JSON record must fit in 1 KiB or the build fails
-  with `MetadataTooLarge`.
-- **Requires Rust 1.85+** and a Cargo `build.rs` context.
+- Embedding supports little-endian Linux targets. Native non-Linux builds
+  have no metadata; cross-host builds have [additional limits](docs/GUIDE.md#cross-compilation).
+- GNU ld.bfd is supported; gold cannot parse the script. Verify other linkers
+  with `readelf -SW`: `.note.package` must have type `NOTE`.
+- Values become printable ASCII; unsupported characters are removed.
+  The entire JSON record must fit in 1 KiB.
+- Statically linked libraries read the executable's metadata, not their own.
+- Core-dump recovery depends on the dump capturing the note's memory.
+- Metadata is public. Do not embed secrets.
 
 ## Learn more
 
-The [**full guide**](docs/GUIDE.md) covers everything beyond the basics:
-
-- [Metadata fields](docs/GUIDE.md#metadata-fields) and
-  [configuration](docs/GUIDE.md#configuration)
-- [CI integration](docs/GUIDE.md#ci-integration): wiring up build numbers from
-  Azure Pipelines, GitHub Actions, etc.
-- [Custom `build.rs`](docs/GUIDE.md#custom-buildrs-supplying-metadata-programmatically):
-  supplying metadata programmatically and static-library flows
-- [Disabling optional fields](docs/GUIDE.md#disabling-optional-fields),
-  [cross-compilation](docs/GUIDE.md#cross-compilation),
-  [inspection](docs/GUIDE.md#validation-and-inspection),
-  [error handling](docs/GUIDE.md#error-handling), and
-  [security](docs/GUIDE.md#security-considerations)
-
-API reference: [docs.rs/module-info](https://docs.rs/module-info).
-
-Changelog: [CHANGELOG.md](CHANGELOG.md). Security policy: [SECURITY.md](SECURITY.md).
+- [Guide](docs/GUIDE.md): fields, CI versions, custom metadata, and troubleshooting.
+- [API reference](https://docs.rs/module-info) and [examples](https://github.com/microsoft/module-info/tree/main/examples).
+- [Changelog](CHANGELOG.md) and [security policy](https://github.com/microsoft/module-info/blob/main/SECURITY.md).
 
 ## License
 

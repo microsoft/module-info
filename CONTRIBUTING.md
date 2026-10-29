@@ -83,6 +83,15 @@ cargo build --manifest-path examples/sample_elf_bin/Cargo.toml
 cargo test  --manifest-path examples/sample_elf_bin/Cargo.toml
 ```
 
+## Dependency maintenance
+
+Dependabot groups routine patch and minor updates monthly, with one open
+version-update PR per ecosystem. Major updates stay separate and use the same
+slot, so an open major update can delay the next batch. Review every update:
+patch and minor releases, especially for pre-1.0 crates, can still break builds.
+Keep Dependabot alerts and security updates enabled; security fixes do not wait
+for the monthly schedule. Existing review and validation requirements still apply.
+
 ## Style Guidelines
 
 - Follow the standard Rust style guidelines.

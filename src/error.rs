@@ -5,18 +5,15 @@ use std::fmt;
 
 use cfg_if::cfg_if;
 
-/// Errors returned from `module_info` APIs.
+/// Build-time and runtime errors.
 ///
-/// `#[non_exhaustive]`: new variants may land in minor releases. Any `match`
-/// on this enum from outside the crate needs a wildcard arm or it will
-/// fail to compile when a variant is added.
+/// External matches need a wildcard arm because variants may be added.
 ///
 /// # Example
 ///
 /// ```
 /// use module_info::{ModuleInfoError, ModuleInfoResult};
 ///
-/// // A function that might return a ModuleInfoError
 /// fn get_module_name() -> ModuleInfoResult<String> {
 ///     Err(ModuleInfoError::NotAvailable("example".to_string()))
 /// }
@@ -24,8 +21,6 @@ use cfg_if::cfg_if;
 /// match get_module_name() {
 ///     Ok(name) => println!("Module name: {name}"),
 ///     Err(ModuleInfoError::NotAvailable(msg)) => eprintln!("not available: {msg}"),
-///     Err(ModuleInfoError::NullPointer) => eprintln!("null pointer"),
-///     Err(ModuleInfoError::MalformedJson(msg)) => eprintln!("malformed JSON: {msg}"),
 ///     Err(e) => eprintln!("other error: {e}"),
 /// }
 /// ```
@@ -36,9 +31,7 @@ pub enum ModuleInfoError {
     /// off or the target is not Linux. The contained string carries context.
     NotAvailable(String),
 
-    /// A null pointer was passed to `extract_module_info`. Typically means
-    /// the linker script did not run or the `.note.package` section was
-    /// stripped from the binary.
+    /// A null pointer was passed to `extract_module_info`.
     NullPointer,
 
     /// The embedded bytes were not valid UTF-8.
