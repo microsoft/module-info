@@ -1,28 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Module containing the enum definition for module info field types
-//!
-//! This module provides a type-safe way to access module info fields
-//! through the `get_module_info!` macro.
+//! Metadata field names and their JSON/linker mappings.
 
-/// Represents the available module info fields
+/// Metadata fields accepted by [`get_module_info!`](crate::get_module_info).
 ///
-/// This enum provides a type-safe way to specify which module info field
-/// to access when using the `get_module_info!` macro.
-///
-/// # Non-exhaustive
-///
-/// This enum is marked `#[non_exhaustive]`: additional fields may be added
-/// in future minor releases without breaking SemVer. Any external `match`
-/// on `ModuleInfoField` **must** include a wildcard arm (`_ => ...`) so
-/// downstream code keeps compiling when new variants are introduced.
+/// External matches must include a wildcard arm because fields may be added.
+/// The macro matches variant names as tokens; import this enum only when
+/// using its values or methods outside the macro.
 ///
 /// # Example
-///
-/// `ModuleInfoField` does not need to be imported when it only appears
-/// inside `get_module_info!(ModuleInfoField::…)`: the macro pattern-matches
-/// the variant as tokens, so the bare macro + result import is enough:
 ///
 /// ```rust
 /// use module_info::{get_module_info, ModuleInfoResult};
@@ -32,32 +19,6 @@
 ///     Ok(binary_name)
 /// }
 /// ```
-///
-/// You only need `use module_info::ModuleInfoField;` when you reference the
-/// enum outside the macro (e.g. in your own `match` or when passing a value
-/// into `ModuleInfoField::to_symbol_name`).
-///
-/// # Adding a new variant
-///
-/// Adding a variant requires synchronized updates in seven places across four
-/// files. The enum `#[non_exhaustive]` + exhaustive matches in
-/// `field_value`/`to_symbol_name`/`to_key` catch most drift as compile errors,
-/// but the `get_module_info!` macro rules are token-matched and their drift
-/// only surfaces at the *consumer's* call site. Skim this list:
-///
-/// 1. This enum declaration (add the variant)
-/// 2. [`ModuleInfoField::to_symbol_name`] match arm (compile-error on miss)
-/// 3. [`ModuleInfoField::to_key`] match arm (compile-error on miss)
-/// 4. [`ModuleInfoField::ALL`] + `EXPECTED_VARIANT_COUNT` in the drift-guard
-///    test (runtime failure on miss)
-/// 5. `PackageMetadata` field + `field_value` match arm (compile-error on miss)
-/// 6. `src/macros.rs`: per-variant rule in the Linux `get_module_info!`
-///    macro AND in the non-Linux fallback macro. **Missing a rule here is
-///    silent: `get_module_info!(ModuleInfoField::NewField)` only fails at
-///    the consumer's call site.**
-/// 7. `src/macros.rs`: an `@__add_to_map` line in the no-arg form of the
-///    Linux `get_module_info!` macro. **Missing this line silently drops
-///    the field from the no-arg HashMap.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ModuleInfoField {
@@ -73,7 +34,7 @@ pub enum ModuleInfoField {
     Name,
     /// The type of module
     Type,
-    /// The repository URL
+    /// The repository name
     Repo,
     /// The branch name
     Branch,
@@ -88,15 +49,7 @@ pub enum ModuleInfoField {
 }
 
 impl ModuleInfoField {
-    /// Converts the enum variant to the corresponding linker symbol name
-    /// (for example, `ModuleInfoField::Binary` → `"module_info_binary"`).
-    ///
-    /// This is primarily an internal helper used by the `get_module_info!`
-    /// macro expansion and by debugging utilities; most consumers should
-    /// reach for the macro rather than calling this directly.
-    ///
-    /// # Returns
-    /// A string slice containing the symbol name for this field.
+    /// Return the linker symbol name, such as `"module_info_binary"`.
     pub fn to_symbol_name(&self) -> &'static str {
         match self {
             ModuleInfoField::Binary => "module_info_binary",
@@ -114,15 +67,7 @@ impl ModuleInfoField {
         }
     }
 
-    /// Converts the enum variant to the JSON/`HashMap` key used for this field
-    /// (for example, `ModuleInfoField::ModuleVersion` → `"moduleVersion"`).
-    ///
-    /// This is primarily an internal helper used by the no-argument form of
-    /// `get_module_info!()` when it assembles the result `HashMap`. Direct
-    /// consumer use is uncommon; reach for the macro instead.
-    ///
-    /// # Returns
-    /// A string slice containing the key for this field in the HashMap.
+    /// Return the JSON and runtime-map key, such as `"moduleVersion"`.
     pub fn to_key(&self) -> &'static str {
         match self {
             ModuleInfoField::Binary => "binary",
@@ -140,12 +85,7 @@ impl ModuleInfoField {
         }
     }
 
-    /// All variants of `ModuleInfoField`, in a stable declaration order.
-    ///
-    /// This single source-of-truth list is used by [`ModuleInfoField::count`]
-    /// and by the no-argument form of the `get_module_info!` macro to build
-    /// the result `HashMap`. Adding a variant above and forgetting to add it
-    /// here will be caught by the agreement test in `lib.rs`.
+    /// All fields, in the order used to emit metadata.
     pub const ALL: &'static [ModuleInfoField] = &[
         ModuleInfoField::Binary,
         ModuleInfoField::Version,
@@ -161,10 +101,7 @@ impl ModuleInfoField {
         ModuleInfoField::OsVersion,
     ];
 
-    /// Returns the number of variants in the `ModuleInfoField` enum.
-    ///
-    /// Derived from [`ModuleInfoField::ALL`] so it stays in sync automatically
-    /// when variants are added or removed.
+    /// Return the number of fields in [`Self::ALL`].
     pub const fn count() -> usize {
         Self::ALL.len()
     }

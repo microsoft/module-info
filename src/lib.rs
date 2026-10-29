@@ -1,75 +1,29 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-//! Embed metadata into ELF binaries as `.note.package` sections so it
-//! **survives crashes**, visible to `coredumpctl`, `readelf -n`, and any
-//! other consumer of the [systemd package-metadata
-//! format](https://uapi-group.org/specifications/specs/package_metadata_for_executable_files/).
-//! The crate's main feature is crash-dump preservation: when your process dies,
-//! the version of code that crashed is recoverable from the core dump without external
-//! symbol files or build-system context.
+//! Identify a Rust build from its Linux binary or a core dump that captured
+//! its metadata. The crate stores build details in an ELF note: the
+//! `.note.package` section, using the
+//! [package metadata format](https://uapi-group.org/specifications/specs/package_metadata_for_executable_files/).
 //!
-//! Runtime read-back via the [`get_module_info!`] macro is a *convenience
-//! accessor*, useful while the process is still alive but not the reason
-//! the crate exists.
-//!
-//! Consumers call [`generate_project_metadata_and_linker_script`] from
-//! `build.rs` to generate the linker script and Cargo directives. At
-//! runtime, metadata fields can be read via [`get_module_info!`] (returns
-//! `ModuleInfoResult<String>` for a single field, or a `HashMap` of all
-//! readable fields when called with no arguments). On non-Linux platforms
-//! the crate exposes no-op stubs so cross-platform builds still compile;
-//! runtime accessors return `ModuleInfoError::NotAvailable`.
-//!
-//! See the README (and `docs/GUIDE.md`) and the `examples/` directory for an
-//! end-to-end integration.
+//! Call [`generate_project_metadata_and_linker_script`] in `build.rs` and
+//! [`embed!`] at your crate root. Optional runtime access is available through
+//! [`get_module_info!`]. See the
+//! [quick start](https://github.com/microsoft/module-info#quick-start) and
+//! [guide](https://github.com/microsoft/module-info/blob/main/docs/GUIDE.md).
 //!
 //! # Limitations
 //!
-//! **`rlib` consumers read the host binary's metadata, not their own.**
-//! When a downstream library's `build.rs` calls
-//! [`generate_project_metadata_and_linker_script`], the resulting
-//! `cargo:rustc-link-arg=-T<linker_script>.ld` directive is attached to that
-//! library's own build and does not propagate to the final executable's link
-//! command, so the library's linker script never runs at the link step that
-//! produces the binary. Meanwhile, every [`get_module_info!`] call inside
-//! the library expands to an `extern "C" { static module_info_*: u8; }`
-//! declaration. At the final link those undefined references resolve
-//! against the executable's linker script, which defines a single set of
-//! `module_info_*` symbols pointing at the executable's `.note.package`
-//! payload, so library code reading them gets the executable's values. The
-//! same applies to anything statically linked into a Rust executable:
-//! `rlib`, `staticlib` linked via `#[link(kind = "static")]`, or in-tree
-//! workspace libraries.
-//!
-//! **`staticlib` consumed by an outer (non-cargo) build can embed its own
-//! metadata.** Set `EmbedOptions::emit_cargo_link_arg` to `false`; the
-//! crate then writes `linker_script.ld` to `out_dir` without emitting the
-//! `cargo:rustc-link-arg` directive. The outer build (Make, CMake, MSBuild,
-//! …) passes that script to its own linker, at which point the
-//! `module_info_*` symbols are defined by the staticlib's linker script and
-//! the staticlib reads its own metadata. See "Option B" in `docs/GUIDE.md`
-//! for the full flow.
-//!
-//! **`cdylib` shared libraries loaded via `dlopen` are not affected.** A
-//! `cdylib` runs its own link step and applies its own linker script, so
-//! the `module_info_*` symbols inside the resulting `.so` are local to it
-//! (not exported in the dynamic symbol table). Code inside the library
-//! reads its own metadata correctly, even when the host process's main
-//! executable also embeds `.note.package`. To consume a `cdylib`'s metadata
-//! at runtime, expose an `extern "C"` accessor and call it via `dlopen`;
-//! see `examples/sample_elf_bin_with_lib` for the full pattern. Reading a
-//! library file's metadata without loading it (e.g. for crash triage) is
-//! always possible by parsing the ELF note section from the `.so` on disk.
-//!
-//! **Little-endian targets only.** The ELF note header is serialized with
-//! `u32::to_le_bytes` at `build.rs` time. Supported targets today are
-//! `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, and
-//! `i686-unknown-linux-gnu` (all little-endian). Cross-compiling for a
-//! big-endian Linux target (s390x, powerpc-be, mips-be) will silently emit
-//! a byte-swapped note section that `readelf -n` and `systemd-coredump`
-//! cannot parse. Adding big-endian support would mean selecting `to_le_bytes`
-//! vs `to_be_bytes` from `CARGO_CFG_TARGET_ENDIAN`.
+//! - Embedding supports little-endian Linux. Cross-host builds have additional
+//!   restrictions described in the guide.
+//! - Native non-Linux builds have no metadata; runtime reads return
+//!   [`ModuleInfoError::NotAvailable`].
+//! - Fields become printable ASCII. The complete JSON limit is 1 KiB.
+//! - A `cdylib` can read its own metadata; statically linked code reads the
+//!   final executable's values.
+//! - GNU ld.bfd supports the script; gold does not. Verify other linkers.
+//! - Core recovery requires the note's memory to be captured in the dump.
+//! - Metadata is public. Do not embed secrets.
 
 mod error;
 mod fields;
@@ -108,45 +62,18 @@ cfg_if! {
         #[doc(hidden)]
         pub static PACKAGE_NOTE_SECTION: [u8; 0] = [];
 
-        /// Force the `module_info` rlib to be linked into the consuming binary so the
-        /// `.note.package` section is emitted with ELF type `SHT_NOTE`.
+        /// Keep the note anchor in the final binary so `.note.package` has
+        /// the `NOTE` section type expected by inspection tools.
         ///
-        /// # Why this is needed
-        ///
-        /// The note data is produced by the linker script that `build.rs` generates.
-        /// GNU ld assigns `SHT_NOTE` to the output `.note.package` only when an
-        /// input object file contributes a same-named input section already typed
-        /// `SHT_NOTE`; this crate provides exactly that input section through the
-        /// `#[link_section = ".note.package"]` static `PACKAGE_NOTE_SECTION`.
-        /// Without a source-level reference to this crate, cargo/rustc drops the
-        /// `module_info` rlib from the final link, no `SHT_NOTE` input section is
-        /// present, and ld synthesizes the output section from the script's
-        /// `BYTE(...)` directives alone, which yields `SHT_PROGBITS`. The bytes
-        /// are present, but tools like `readelf -n` and `systemd-coredump` filter
-        /// by section type and ignore it.
-        ///
-        /// Invoking `module_info::embed!()` at the crate root creates a `#[used]`
-        /// reference to [`PACKAGE_NOTE_SECTION`], which forces the rlib to link and
-        /// restores the correct section type.
-        ///
-        /// # When to use it
-        ///
-        /// Use `embed!()` when the consuming crate does **not** call `get_module_info!`
-        /// or reference any other `module_info` item at runtime (pure build-time
-        /// embedding). When the consuming crate already calls
-        /// `module_info::get_module_info!(...)` or imports any item from the crate,
-        /// this macro is unnecessary; the rlib is already linked.
+        /// Call at the crate root, alongside the metadata-generating `build.rs`.
+        /// This is needed even when your program never reads metadata at runtime.
+        /// It does nothing when embedding is disabled or the target is not Linux.
         ///
         /// # Example
         ///
         /// ```ignore
-        /// // Top of src/main.rs or src/lib.rs:
         /// module_info::embed!();
-        ///
-        /// fn main() {
-        ///     // No other module_info references needed for the .note.package
-        ///     // section to end up in the binary with SHT_NOTE type.
-        /// }
+        /// fn main() {}
         /// ```
         #[macro_export]
         macro_rules! embed {
@@ -180,28 +107,15 @@ cfg_if! {
     }
 }
 
-/// Options controlling how [`embed_package_metadata`] writes artifacts and
-/// whether it emits cargo link-arg directives.
+/// Output settings for [`embed_package_metadata`].
 ///
-/// `EmbedOptions::default()` preserves the original zero-config behavior:
-/// write to `$OUT_DIR` and emit `cargo:rustc-link-arg=-T<linker_script.ld>`.
-/// Override when the crate is a static library whose final link happens later
-/// in the outer build system.
-///
-/// # Non-exhaustive
-///
-/// This struct is `#[non_exhaustive]` so new options can land without a
-/// SemVer break. Use `..Default::default()` when constructing.
+/// Defaults to `$OUT_DIR` and emits a Cargo linker argument. For an outer
+/// build system, choose a directory and disable that argument.
+/// This type is non-exhaustive: construct with `Default`, then assign fields.
 ///
 /// # Example
 /// ```rust,no_run
 /// # use module_info::EmbedOptions;
-/// // Static-library flow: write the linker script to a directory the outer
-/// // build system knows about, so it can pass the script to the final linker.
-/// // In practice `out_dir` comes from an env var the outer build sets, or a
-/// // subdirectory of `OUT_DIR`; here we use `env::temp_dir()` as a portable
-/// // placeholder. `EmbedOptions` is `#[non_exhaustive]`, so construct via
-/// // `Default` and assign fields rather than using struct-literal syntax.
 /// let mut opts = EmbedOptions::default();
 /// opts.out_dir = Some(std::env::temp_dir().join("module_info_linker"));
 /// opts.emit_cargo_link_arg = false;
@@ -236,60 +150,37 @@ impl Default for EmbedOptions {
 
 /// Artifacts written by [`embed_package_metadata`].
 ///
-/// Returned so consumers can log, inspect, or pass paths to a later build
-/// step (for the static-library flow, typically `linker_script_path`).
-///
-/// # Non-exhaustive
-///
-/// `#[non_exhaustive]`. Constructed by the crate, not by consumers.
+/// Use the paths to inspect output or pass the script to an outer linker.
+/// This non-exhaustive type is returned by the crate, not constructed by callers.
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct EmbedArtifacts {
-    /// Absolute path to the generated linker script (`linker_script.ld`).
+    /// Path to the generated linker script (`linker_script.ld`).
     pub linker_script_path: PathBuf,
-    /// Absolute path to the raw `.note.package` binary dump.
+    /// Path to the raw `.note.package` binary dump.
     pub note_bin_path: PathBuf,
-    /// Absolute path to the embedded JSON metadata (`module_info.json`). One
-    /// key:value pair per line; matches the bytes the linker script writes
-    /// into the `.note.package` descriptor (see `json` below).
+    /// Path to `module_info.json`, containing [`Self::json`].
     pub json_path: PathBuf,
-    /// JSON string written to `module_info.json` and embedded as the note
-    /// section's descriptor. One key:value pair per line (not strictly
-    /// "compact"); the runtime scan in `extract_module_info` tolerates the
-    /// embedded newlines.
+    /// Embedded JSON, with one key/value pair per line, before NUL padding.
     pub json: String,
     /// Byte-encoded linker script body that produced `linker_script.ld`.
     pub linker_script_body: String,
 }
 
-/// Convenience struct-literal view over [`PackageMetadata`] with field names
-/// shaped like the JSON keys rather than the internal Rust snake_case names.
+/// Metadata for [`new`], with field names matching the JSON keys.
 ///
-/// `Info` exists so call sites can read the same way the embedded JSON reads:
-/// `r#type`, `moduleVersion`, `osVersion` instead of `module_type`,
-/// `module_version`, `os_version`. It's deliberately **not** `#[non_exhaustive]`:
-/// struct-literal construction is the whole point. Pass it to [`new`] to build
-/// the note artifacts in one call:
+/// Supply the seven required fields shown below. Other fields may be empty.
+/// No Git or OS values are detected; all values are sanitized and validated.
+/// Use [`PackageMetadata::from_cargo_toml`] when you want detected defaults.
 ///
-/// # Forward compatibility
-///
-/// **Always terminate the struct literal with `..Default::default()`.** Unlike
-/// [`PackageMetadata`] (which is `#[non_exhaustive]` and forbids struct-literal
-/// construction from outside the crate, forcing consumers into the
-/// field-assignment pattern that is intrinsically forward-compatible), `Info`
-/// permits a fully-exhaustive literal. That means a minor release of this
-/// crate that adds a new field will break any `Info { … }` call site that
-/// listed every field by name. The `..Default::default()` terminator is how
-/// consumers buy forward compatibility: new fields fall back to their
-/// `Default` value (empty string / disabled) instead of failing to compile.
-/// This is the *only* reason `Info` is safe to add fields to in minor
-/// releases. Omit the terminator and the crate can no longer do that
-/// without breaking you.
+/// End literals with `..Default::default()` to accommodate future fields.
+/// Rust spells the JSON `type` field as `r#type`.
 ///
 /// ```rust,no_run
 /// # use module_info::Info;
-/// let _ = module_info::new(Info {
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let _artifacts = module_info::new(Info {
 ///     binary: "my_tool".into(),
 ///     name: "my_tool".into(),
 ///     maintainer: "team@contoso.com".into(),
@@ -297,45 +188,11 @@ pub struct EmbedArtifacts {
 ///     moduleVersion: "1.2.3.4".into(),
 ///     os: "linux".into(),
 ///     osVersion: "22.04".into(),
-///     r#type: "agent".into(),
-///     hash: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into(),
 ///     ..Default::default()
-/// });
+/// })?;
+/// # Ok(())
+/// # }
 /// ```
-///
-/// Under the hood `new` converts this to a [`PackageMetadata`] and calls
-/// [`embed_package_metadata`] with [`EmbedOptions::default()`].
-///
-/// # No auto-detection on this path
-///
-/// Every field in the `Info` literal ships verbatim. `os`/`osVersion` are
-/// **not** read from `/etc/os-release`, and `repo`/`branch`/`hash` are
-/// **not** read from git. The caller owns every value. If you want the
-/// `/etc/os-release` + git auto-detection that the zero-config entry point
-/// provides, reach for [`PackageMetadata::from_cargo_toml`] instead,
-/// mutate the fields you want to override, and pass the result to
-/// [`embed_package_metadata`].
-///
-/// # Disabling fields
-///
-/// Seven keys are required at validation time:
-/// `binary`, `version`, `moduleVersion`, `name`, `maintainer`, `os`, and
-/// `osVersion`. The rest (`r#type`, `repo`, `branch`, `hash`, `copyright`)
-/// may be left as the empty string (the `Default` value);
-/// `..Default::default()` in the literal above is the idiomatic way to
-/// opt out. The embedded JSON still carries every key (the
-/// `.note.package` layout is fixed), but the value ships as `""`, which
-/// downstream tooling can treat as "disabled."
-///
-/// # `r#type` tradeoff
-///
-/// The JSON key is `type`, which collides with Rust's `type` keyword. We use
-/// the raw-identifier form `r#type` rather than a `#[serde(rename = "type")]`
-/// alias on a differently-named field (say, `module_type`), because the
-/// latter would require call sites to remember the rename when constructing
-/// the struct literal, re-creating the original mismatch this type is meant
-/// to solve. `r#type` is ugly but pays off once: downstream construction
-/// reads `r#type: "agent".into()` and the JSON reads `"type":"agent"`.
 #[cfg(target_os = "linux")]
 #[allow(non_snake_case)] // JSON-key-shaped field names (moduleVersion, osVersion) are intentional.
 #[derive(Debug, Clone, Default)]
@@ -767,22 +624,10 @@ pub fn generate_project_metadata_and_linker_script() -> Result<(), Box<dyn std::
     Ok(())
 }
 
-/// Prints all available module info to stdout and returns a result indicating success or failure
-///
-/// This utility function retrieves all embedded module information and
-/// outputs it to the console with labels. It's useful for debugging or displaying
-/// version information in command-line tools.
+/// Print metadata to stdout, one labeled field per line.
 ///
 /// # Examples
 ///
-/// Basic usage with simple error handling:
-/// ```rust,no_run
-/// if module_info::print_module_info().is_ok() {
-///     println!("Module info displayed successfully");
-/// }
-/// ```
-///
-/// Error handling:
 /// ```rust,no_run
 /// use module_info::{print_module_info, ModuleInfoError};
 ///
@@ -795,19 +640,10 @@ pub fn generate_project_metadata_and_linker_script() -> Result<(), Box<dyn std::
 ///
 /// # Errors
 ///
-/// This function will return an error in the following situations:
-/// - If any of the seven required identity-plus-platform fields (`binary`,
-///   `version`, `moduleVersion`, `name`, `maintainer`, `os`, `osVersion`) is
-///   missing or empty, suggesting the metadata is missing or corrupted
-///   (returns `ModuleInfoError::NotAvailable`)
-/// - If running on a non-Linux platform where module info isn't supported (returns `ModuleInfoError::NotAvailable`)
-///
-/// # Note
-/// This function is only available when the "embed-module-info" feature is
-/// enabled *and* the target OS is Linux. On other platforms the function
-/// exists as a no-op stub that returns `NotAvailable`, matching the
-/// non-Linux `get_module_info!` macro behavior so cross-platform callers
-/// compile unchanged.
+/// Returns `NotAvailable` when any required field is missing or empty, or when
+/// the target is not Linux or `embed-module-info` is disabled.
+/// Required fields are `binary`, `version`, `moduleVersion`, `name`,
+/// `maintainer`, `os`, and `osVersion`.
 #[cfg(all(feature = "embed-module-info", target_os = "linux"))]
 #[must_use = "print_module_info returns a Result indicating whether the embedded note section was readable; ignoring it will hide missing-metadata errors"]
 pub fn print_module_info() -> ModuleInfoResult<()> {
@@ -893,19 +729,20 @@ pub fn get_module_version() -> ModuleInfoResult<String> {
 /// pointer.
 ///
 /// # Safety
-/// `ptr` must point to a valid, properly aligned, null-terminated byte
-/// sequence inside the read-only `.note.package` payload (i.e. the address
-/// of one of the `module_info_*` symbols emitted by the linker script). The
-/// memory must remain valid for the duration of the call. Passing any other
-/// pointer is undefined behavior. The internal scan is bounded by
-/// `MAX_JSON_SIZE + NOTE_ALIGN`, so a missing/corrupted section produces
-/// `MalformedJson` rather than reading off the end.
+/// A non-null `ptr` must point to a readable, NUL-terminated byte sequence
+/// that remains valid and unmodified for the call. Generated `module_info_*`
+/// symbols point to such sequences in the read-only `.note.package` payload.
+///
+/// Reads stop at the second quote, a NUL, or `MAX_JSON_SIZE + NOTE_ALIGN`
+/// bytes. This cap does not establish pointer validity or protect memory
+/// beyond the allocation. Passing an invalid non-null pointer is undefined
+/// behavior.
 ///
 /// # Errors
 /// - `ModuleInfoError::NullPointer` if `ptr` is null
 /// - `ModuleInfoError::Utf8Error` if the bytes are not valid UTF-8
-/// - `ModuleInfoError::MalformedJson` if the section is missing/stripped or
-///   the value is not surrounded by `"` characters
+/// - `ModuleInfoError::MalformedJson` if two quotes are not found before
+///   a NUL or the scan limit
 /// - `ModuleInfoError::NotAvailable` on non-Linux targets
 ///
 /// # Example

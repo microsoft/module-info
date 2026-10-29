@@ -93,33 +93,23 @@ macro_rules! debug {
     }};
 }
 
-/// Read the embedded metadata at runtime.
+/// Read one embedded field, or a map of all readable fields.
 ///
-/// Two call shapes:
+/// Import and call the macro as `get_module_info!`; qualified or renamed
+/// calls currently require that original name in scope too.
+/// `ModuleInfoField::Binary` is matched as tokens, so the enum needs no import.
 ///
-/// - `get_module_info!()` returns
-///   `ModuleInfoResult<HashMap<String, String>>` covering every field that
-///   resolved. Fields disabled at build time appear with value `""`.
-///   Fields whose symbols failed to resolve (`.note.package` stripped from
-///   the binary, or no `module_info::embed!()` invocation reached the
-///   linker) are **omitted** from the map, so check `contains_key` before
-///   assuming a key is present.
-/// - `get_module_info!(ModuleInfoField::Binary)` returns
-///   `ModuleInfoResult<String>` for a single field. Disabled fields
-///   yield `Ok("")`; unresolved symbols yield
-///   `Err(ModuleInfoError::NotAvailable)`.
-///
-/// If the process has already crashed, the same data is reachable via
-/// `coredumpctl info`, `readelf -n`, or WinDbg against the core dump,
-/// without going through this macro.
+/// The single-field form returns `ModuleInfoResult<String>`. The no-argument
+/// form returns `ModuleInfoResult<HashMap<String, String>>` and omits failed
+/// reads. Disabled fields remain present with value `""`.
 ///
 /// # Examples
 ///
-/// Retrieve all module info:
 /// ```rust
 /// use module_info::{get_module_info, ModuleInfoResult};
 ///
 /// fn print_all() -> ModuleInfoResult<()> {
+///     println!("Binary: {}", get_module_info!(ModuleInfoField::Binary)?);
 ///     for (key, value) in get_module_info!()? {
 ///         println!("{key}: {value}");
 ///     }
@@ -127,33 +117,18 @@ macro_rules! debug {
 /// }
 /// ```
 ///
-/// ```rust
-/// use module_info::{get_module_info, ModuleInfoResult};
-///
-/// fn binary_name() -> ModuleInfoResult<String> {
-///     get_module_info!(ModuleInfoField::Binary)
-/// }
-/// ```
-///
-/// `ModuleInfoField::Foo` is matched as tokens by the macro, so the enum
-/// itself does not need to be imported when it appears only inside
-/// `get_module_info!(...)`.
-///
 /// # Safety
 ///
-/// The macro reads `extern "C" static: u8` symbols emitted by the build
-/// script's linker script. The symbols are placed inside the read-only
-/// `.note.package` payload by the linker; the macro takes their address
-/// and hands it to [`crate::extract_module_info`], which scans for the
-/// terminating NUL. Memory is never written, and the bound check inside
-/// `extract_module_info` keeps a stripped or corrupted section from
-/// reading past the cap.
+/// This safe wrapper relies on the generated linker script placing its symbols
+/// in the valid, read-only note payload. Do not replace those symbols with
+/// arbitrary addresses. See [`crate::extract_module_info`] for pointer requirements.
 ///
 /// # Availability
 ///
-/// This form is active when `embed-module-info` is enabled and the target
-/// is Linux. The fallback form (declared below) is active otherwise and
-/// returns `ModuleInfoError::NotAvailable` for every variant.
+/// Reads require Linux and `embed-module-info`; otherwise the result is
+/// `ModuleInfoError::NotAvailable`. Missing symbols on Linux are link errors,
+/// not runtime fallback values. Single-field reads can return UTF-8 or malformed
+/// value errors; see [`crate::extract_module_info`].
 #[cfg(all(feature = "embed-module-info", target_os = "linux"))]
 #[macro_export]
 macro_rules! get_module_info {

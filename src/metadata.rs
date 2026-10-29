@@ -10,60 +10,28 @@ use crate::{
     ModuleInfoError, ModuleInfoField, ModuleInfoResult, NOTE_ALIGN,
 };
 
-/// Package metadata for embedding in the ELF `.note.package` section.
+/// Raw metadata passed to [`embed_package_metadata`](crate::embed_package_metadata).
 ///
-/// `PackageMetadata` holds the raw (unsanitized) metadata values that will be
-/// serialized to JSON and byte-encoded into the linker script by
-/// [`embed_package_metadata`](crate::embed_package_metadata). Callers may
-/// either populate this struct manually in `build.rs` (e.g. to supply values
-/// from an outer build system without touching `Cargo.toml`) or use
-/// [`PackageMetadata::from_cargo_toml`] to read the current crate's metadata.
+/// Use [`Self::from_cargo_toml`] for detected defaults, or construct with
+/// `Default` and assign fields. External struct literals are not supported.
 ///
-/// # Non-exhaustive + Default
-///
-/// This struct is marked `#[non_exhaustive]` and implements [`Default`] so new
-/// fields can be added in future minor releases without breaking downstream
-/// code. From outside the crate, `#[non_exhaustive]` forbids struct-literal
-/// construction; start from [`Default::default()`] and assign the fields you
-/// need:
-///
-/// ```rust,no_run
-/// # use module_info::PackageMetadata;
-/// let mut md = PackageMetadata::default();
-/// md.maintainer = "team@contoso.com".into();
-/// md.module_type = "agent".into();
-/// md.version = "1.2.3".into();
-/// md.module_version = "1.2.3.4".into();
-/// ```
-///
-/// # Disabling fields
-///
-/// Seven keys are *required* in the embedded JSON:
-/// `binary`, `version`, `moduleVersion`, `name`, `maintainer`, `os`, and
-/// `osVersion`. The remaining fields (`type`, `repo`, `branch`, `hash`,
-/// `copyright`) are optional. Leave them as the empty string and the
-/// corresponding JSON value is emitted as `""`, which downstream tooling
-/// can skip. `from_cargo_toml()` populates the `os`/`osVersion` fields
-/// from `/etc/os-release`, so most builders get them for free; override
-/// only when the detected values don't match the target platform.
-///
-/// The JSON shape stays stable (every key is always present) because the
-/// `.note.package` payload is a fixed-layout byte array built from the
-/// linker script; the empty-string-as-disabled convention keeps the layout
-/// constant while letting consumers opt out of leaking fields they don't
-/// want in the binary.
+/// Embedding sanitizes and validates values. `binary`, `version`,
+/// `module_version`, `name`, `maintainer`, `os`, and `os_version` must be
+/// non-empty. Other fields may be cleared; their JSON keys remain present
+/// with value `""`. OS defaults describe the build host, not a cross-build target.
 ///
 /// ```rust,no_run
 /// use module_info::PackageMetadata;
 ///
 /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     // Library crate that doesn't want to embed git or repo info:
 ///     let mut md = PackageMetadata::from_cargo_toml()?;
+///     md.maintainer = "team@contoso.com".into();
 ///     md.repo.clear();
 ///     md.branch.clear();
 ///     md.hash.clear();
-///     // `md` still carries binary/version/moduleVersion/name/maintainer
-///     // plus os/osVersion (auto-populated from /etc/os-release).
+///     let _artifacts = module_info::embed_package_metadata(
+///         &md, &module_info::EmbedOptions::default(),
+///     )?;
 ///     Ok(())
 /// }
 /// ```
@@ -111,33 +79,20 @@ pub struct PackageMetadata {
 }
 
 impl PackageMetadata {
-    /// Build a [`PackageMetadata`] by reading the current crate's `Cargo.toml`,
-    /// environment-variable overrides, git working copy, and OS release info.
+    /// Collect unsanitized metadata from Cargo, configured environment
+    /// variables, Git, and the build host's OS release file.
     ///
-    /// This is the zero-configuration entry point: the build script for a
-    /// normal Cargo crate can just call
-    /// [`generate_project_metadata_and_linker_script`](crate::generate_project_metadata_and_linker_script),
-    /// which uses this method under the hood. Call `from_cargo_toml` directly
-    /// only when you need to inspect or mutate the collected metadata before
-    /// passing it to [`embed_package_metadata`](crate::embed_package_metadata).
-    ///
-    /// The returned values are *unsanitized*. `embed_package_metadata` runs
-    /// the sanitize step internally so the linker-script bytes and the JSON
-    /// string agree byte-for-byte (the invariant that keeps the `.note.package`
-    /// section 4-byte aligned).
+    /// Call in `build.rs`, then modify fields before embedding. Git failures
+    /// use fallback values; a missing OS release file uses `Linux` / `Unknown`.
     ///
     /// # Errors
-    /// Returns a [`ModuleInfoError`] if `Cargo.toml` is unreadable or malformed,
-    /// if git invocation fails, or if the OS release info cannot be read.
+    /// Returns an error for unreadable or malformed Cargo metadata, or a failed
+    /// read or oversized OS release file. Embedding performs field validation.
     pub fn from_cargo_toml() -> ModuleInfoResult<Self> {
         collect_package_metadata()
     }
 
-    /// Return the string value associated with a given [`ModuleInfoField`].
-    ///
-    /// This is the single source of truth mapping `ModuleInfoField` variants
-    /// to `PackageMetadata` fields. Both the linker-script emitter and the
-    /// build-time JSON dump iterate [`ModuleInfoField::ALL`] and call this.
+    /// Return the raw string for a metadata field.
     #[must_use]
     pub fn field_value(&self, field: ModuleInfoField) -> &str {
         match field {
@@ -609,6 +564,52 @@ fn bytes_to_linker_script_format(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rendered_fields_preserve_json_and_linker_bytes() {
+        let md = PackageMetadata {
+            binary: "tool©".into(),
+            version: "1.2.3".into(),
+            module_version: "1.2.3.4".into(),
+            maintainer: "Jos\u{e9}\"\\\n".into(),
+            name: "tool".into(),
+            module_type: String::new(),
+            repo: "project/a*/b".into(),
+            branch: "feat\ture".into(),
+            hash: "deadbeef".into(),
+            copyright: "Contoso™".into(),
+            os: "linux".into(),
+            os_version: "1".into(),
+        };
+        let expected = concat!(
+            "{\n",
+            "\"binary\":\"tool(c)\",\n",
+            "\"version\":\"1.2.3\",\n",
+            "\"moduleVersion\":\"1.2.3.4\",\n",
+            "\"maintainer\":\"Jos\",\n",
+            "\"name\":\"tool\",\n",
+            "\"type\":\"\",\n",
+            "\"repo\":\"project/a*/b\",\n",
+            "\"branch\":\"feature\",\n",
+            "\"hash\":\"deadbeef\",\n",
+            "\"copyright\":\"Contoso(tm)\",\n",
+            "\"os\":\"linux\",\n",
+            "\"osVersion\":\"1\"\n",
+            "}",
+        );
+        let (json, script) = render_note_payloads(&md).expect("render metadata");
+        assert_eq!(json, expected);
+
+        let bytes: Vec<u8> = script
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("BYTE(0x"))
+            .filter_map(|hex| hex.strip_suffix(");"))
+            .map(|hex| u8::from_str_radix(hex, 16).expect("hexadecimal byte"))
+            .collect();
+        let mut expected_bytes = expected.as_bytes().to_vec();
+        expected_bytes.resize(expected.len() + NOTE_ALIGN - expected.len() % NOTE_ALIGN, 0);
+        assert_eq!(bytes, expected_bytes);
+    }
 
     /// After sanitizing, the bytes `serde_json::to_string` emits for the value
     /// must equal the raw bytes the linker script writes (the value wrapped in
