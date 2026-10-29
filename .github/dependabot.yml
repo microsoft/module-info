@@ -1,4 +1,5 @@
-# Weekly Dependabot update PRs. CI's MSRV-1.85 matrix gates every bump,
+# Monthly routine updates. Security updates are handled separately.
+# CI's MSRV-1.85 matrix gates every bump,
 # so a dep that raises the rust floor will fail the PR before it merges.
 version: 2
 updates:
@@ -15,19 +16,21 @@ updates:
       - "/examples/sample_info_api"
       - "/examples/sample_crashing_process"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 1
     groups:
-      # Patches and minors are usually safe; bundle them so we don't drown
-      # in a wave of single-dep PRs each week. Majors stay split out so they
-      # get individual review.
-      patches:
-        update-types: ["patch"]
-      minor:
-        update-types: ["minor"]
+      routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      routine:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["patch", "minor"]
